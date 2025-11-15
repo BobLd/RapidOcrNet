@@ -74,13 +74,20 @@ namespace RapidOcrNet
             SKBitmap newBmp = new SKBitmap(info);
             using (var canvas = new SKCanvas(newBmp))
             using (var paint = new SKPaint())
+            using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = true;
-                paint.FilterQuality = SKFilterQuality.High;
+                paint.IsAntialias = false;
 
                 canvas.Clear(SKColors.White);
-                canvas.DrawBitmap(src, new SKPoint(padding, padding), paint);
+                canvas.DrawImage(image, padding, padding, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
             }
+
+#if DEBUG
+            using (var fs = new FileStream($"Padding_{Guid.NewGuid()}.png", FileMode.Create))
+            {
+                newBmp.Encode(fs, SKEncodedImageFormat.Png, 100);
+            }
+#endif
 
             return newBmp;
         }
@@ -219,12 +226,12 @@ namespace RapidOcrNet
             var partImg = new SKBitmap(info2);
             using (var canvas = new SKCanvas(partImg))
             using (var paint = new SKPaint())
+            using (var image = SKImage.FromBitmap(imgCrop))
             {
-                paint.IsAntialias = true;
-                paint.FilterQuality = SKFilterQuality.High;
+                paint.IsAntialias = false;
 
                 canvas.SetMatrix(m);
-                canvas.DrawBitmap(imgCrop, 0, 0, paint);
+                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
                 canvas.Restore();
             }
 
@@ -246,16 +253,16 @@ namespace RapidOcrNet
         public static SKBitmap BitmapRotateClockWise180(SKBitmap src)
         {
             var rotated = new SKBitmap(src.Info);
-
+            
             using (var canvas = new SKCanvas(rotated))
             using (var paint = new SKPaint())
+            using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = true;
-                paint.FilterQuality = SKFilterQuality.High;
+                paint.IsAntialias = false;
 
                 canvas.Translate(rotated.Width, rotated.Height);
                 canvas.RotateDegrees(180);
-                canvas.DrawBitmap(src, 0, 0, paint);
+                canvas.DrawImage(image,0,0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
                 canvas.Restore();
             }
 
@@ -271,13 +278,13 @@ namespace RapidOcrNet
 
             using (var canvas = new SKCanvas(rotated))
             using (var paint = new SKPaint())
+            using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = true;
-                paint.FilterQuality = SKFilterQuality.High;
+                paint.IsAntialias = false;
 
                 canvas.Translate(rotated.Width, 0);
                 canvas.RotateDegrees(90);
-                canvas.DrawBitmap(src, 0, 0, paint);
+                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
                 canvas.Restore();
             }
             /*

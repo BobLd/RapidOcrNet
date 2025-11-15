@@ -80,7 +80,8 @@ namespace RapidOcrNet
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Tensor<float> inputTensors;
-            using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight), SKFilterQuality.High))
+            using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight),
+                       new SKSamplingOptions(SKCubicResampler.Mitchell)))
             {
 #if DEBUG
                 using (var fs = new FileStream($"Classifier_{Guid.NewGuid()}.png", FileMode.Create))

@@ -11,50 +11,27 @@
 		<PackageReference Include="Clipper2" Version="1.4.0" />
 		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.18.1" />
 		<PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.18.1" />
-		<PackageReference Include="SkiaSharp" Version="2.88.8" />
-		<PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
+		<PackageReference Include="SkiaSharp" Version="3.119.1" />
+		<PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Update="models\ch_ppocr_mobile_v2.0_cls_infer.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		<None Update="models\v5\ch_PP-OCRv5_mobile_det.onnx">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Update="models\ch_ppocr_mobile_v2.0_cls_infer_fp16.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		<None Update="models\v5\ch_ppocr_mobile_v2.0_cls_infer.onnx">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Update="models\ch_ppocr_mobile_v2.0_cls_infer_fp16_opt.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		<None Update="models\v5\latin_PP-OCRv5_rec_mobile_infer.onnx">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Update="models\ch_ppocr_mobile_v2.0_cls_infer_opt.onnx">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		<None Update="models\v5\ppocrv5_latin_dict.txt">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Update="models\en_dict.txt">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_det_infer.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_det_infer_fp16.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_det_infer_fp16_opt.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_det_infer_opt.onnx">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_rec_infer.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_rec_infer_fp16.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_rec_infer_fp16_opt.onnx">
-			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
-		</None>
-		<None Update="models\en_PP-OCRv3_rec_infer_opt.onnx">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="models\NewFolder\" />
 	</ItemGroup>
 
 </Project>

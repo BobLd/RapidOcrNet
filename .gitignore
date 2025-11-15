@@ -361,4 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# RapidOcrNet
 /RapidOcrNet.ConsoleApp/Properties/launchSettings.json
+/RapidOcrNet/models/v5/ch_PP-OCRv5_server_det.onnx

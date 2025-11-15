@@ -44,8 +44,8 @@ namespace RapidOcrNet.Tests
                 "img_10.jpg",
                 new string[]
                 {
-                    "Please lower yourylume", // not correct but better than nothing
-                    "When you pass by",
+                    "Please lower your volume", // not correct but better than nothing
+                    "when you pass by",
                     "residential areas."
                 }
             },
@@ -74,8 +74,7 @@ namespace RapidOcrNet.Tests
                 {
                     "BEWARE OF",
                     "MAINTENANCE",
-                    "VEHICLES",
-                    ""
+                    "VEHICLES"
                 }
             },
             new object[]
@@ -83,12 +82,11 @@ namespace RapidOcrNet.Tests
                 "img_195.jpg",
                 new string[]
                 {
-                    "FRRRR", // Wrong
+                    "",
                     "EXPERIENCE",
                     "Open to Public.",
                     "FIBRE HERE",
-                    "Free Admission.",
-                    "D" // Wrong
+                    "Free Admission."
                 }
             },
             /*
@@ -144,7 +142,7 @@ namespace RapidOcrNet.Tests
                 "Fonts.png",
                 new string[]
                 {
-                    "Bold Italic Fixed Serif CAPITAL 123 x2 y3"
+                    "Bold Italic Fixed Serif CaPitAl 123 x² y3" // not exact but good enough
                 }
             },
             new object[]

@@ -81,7 +81,7 @@ namespace RapidOcrNet
             int dstWidth = (int)(src.Width * scale);
 
             Tensor<float> inputTensors;
-            using (SKBitmap srcResize = src.Resize(new SKSizeI(dstWidth, CrnnDstHeight), SKFilterQuality.High))
+            using (SKBitmap srcResize = src.Resize(new SKSizeI(dstWidth, CrnnDstHeight), new SKSamplingOptions(SKCubicResampler.Mitchell)))
             {
 #if DEBUG
                 using (var fs = new FileStream($"Recognizer_{Guid.NewGuid()}.png", FileMode.Create))

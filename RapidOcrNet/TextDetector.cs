@@ -40,7 +40,7 @@ namespace RapidOcrNet
             float unClipRatio)
         {
             Tensor<float> inputTensors;
-            using (var srcResize = src.Resize(new SKSizeI(scale.DstWidth, scale.DstHeight), SKFilterQuality.High))
+            using (var srcResize = src.Resize(new SKSizeI(scale.DstWidth, scale.DstHeight), new SKSamplingOptions(SKCubicResampler.Mitchell)))
             {
 #if DEBUG
                 using (var fs = new FileStream($"Detector_{Guid.NewGuid()}.png", FileMode.Create))

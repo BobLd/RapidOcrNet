@@ -14,17 +14,16 @@ namespace RapidOcrNet
         private readonly TextRecognizer _textRecognizer = new TextRecognizer();
 
         /// <summary>
-        /// Initialize using default models (english).
+        /// Initialize using default models (latin).
         /// </summary>
         public void InitModels(int numThread = 0)
         {
             const string modelsFolderName = "models";
 
-            string detPath = Path.Combine(modelsFolderName, "en_PP-OCRv3_det_infer_opt.onnx");
-            string clsPath = Path.Combine(modelsFolderName, "ch_ppocr_mobile_v2.0_cls_infer_opt.onnx");
-            string recPath = Path.Combine(modelsFolderName, "en_PP-OCRv3_rec_infer_opt.onnx");
-
-            string keysPath = Path.Combine(modelsFolderName, "en_dict.txt");
+            string detPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ch_PP-OCRv5_mobile_det.onnx"));
+            string clsPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ch_ppocr_mobile_v2.0_cls_infer.onnx"));
+            string recPath = Path.Combine(modelsFolderName, Path.Combine("v5", "latin_PP-OCRv5_rec_mobile_infer.onnx"));
+            string keysPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ppocrv5_latin_dict.txt"));
 
             InitModels(detPath, clsPath, recPath, keysPath, numThread);
         }
@@ -79,7 +78,7 @@ namespace RapidOcrNet
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             // step: dbNet getTextBoxes
-            var textBoxes = _textDetector.GetTextBoxes(src, scale, boxScoreThresh, boxThresh, unClipRatio);
+            var textBoxes = _textDetector.GetTextBoxes(src, scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
             var dbNetTime = sw.ElapsedMilliseconds;
 
 //#if DEBUG
