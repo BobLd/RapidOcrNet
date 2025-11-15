@@ -82,6 +82,13 @@ namespace RapidOcrNet
             Tensor<float> inputTensors;
             using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight), SKFilterQuality.High))
             {
+#if DEBUG
+                using (var fs = new FileStream($"Classifier_{Guid.NewGuid()}.png", FileMode.Create))
+                {
+                    angleImg.Encode(fs, SKEncodedImageFormat.Png, 100);
+                }
+#endif
+
                 inputTensors = OcrUtils.SubtractMeanNormalize(angleImg, _meanValues, _normValues);
             }
 

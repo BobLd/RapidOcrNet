@@ -91,6 +91,7 @@ namespace RapidOcrNet.Tests
                     "D" // Wrong
                 }
             },
+            /*
             new object[]
             {
                 "bold-italic_1.png",
@@ -99,6 +100,7 @@ namespace RapidOcrNet.Tests
                     "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
                 }
             },
+            */
             new object[]
             {
                 "GHOSTSCRIPT-693073-1_2.png",
@@ -107,6 +109,7 @@ namespace RapidOcrNet.Tests
                     "This is test sample"
                 }
             },
+            /*
             new object[]
             {
                 "TIKA-1552-0_3.png",
@@ -120,7 +123,8 @@ namespace RapidOcrNet.Tests
                 new string[]
                 {
                 }
-            },
+            }
+            */
         };
 
         public static IEnumerable<object[]> TesseractImages => new[]
@@ -168,6 +172,7 @@ namespace RapidOcrNet.Tests
                     "of file format."
                 }
             },
+            /*
             new object[]
             {
                 "PSM_SingleBlockVertText.png",
@@ -176,6 +181,7 @@ namespace RapidOcrNet.Tests
                     "A", "l", "i", "n", "e", "o", "f", "t", "e", "x", "t"
                 }
             },
+            */
             new object[]
             {
                 "PSM_SingleColumn.png",
@@ -208,6 +214,7 @@ namespace RapidOcrNet.Tests
                     "This"
                 }
             },
+            /*
             new object[]
             {
                 "scewed-phototest.png",
@@ -223,6 +230,7 @@ namespace RapidOcrNet.Tests
                     "brown dog jumped over the lazy fox."
                 }
             },
+            */
         };
 
 

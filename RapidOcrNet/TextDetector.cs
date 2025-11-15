@@ -42,6 +42,13 @@ namespace RapidOcrNet
             Tensor<float> inputTensors;
             using (var srcResize = src.Resize(new SKSizeI(scale.DstWidth, scale.DstHeight), SKFilterQuality.High))
             {
+#if DEBUG
+                using (var fs = new FileStream($"Detector_{Guid.NewGuid()}.png", FileMode.Create))
+                {
+                    srcResize.Encode(fs, SKEncodedImageFormat.Png, 100);
+                }
+#endif
+
                 inputTensors = OcrUtils.SubtractMeanNormalize(srcResize, MeanValues, NormValues);
             }
 

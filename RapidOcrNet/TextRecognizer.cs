@@ -83,6 +83,13 @@ namespace RapidOcrNet
             Tensor<float> inputTensors;
             using (SKBitmap srcResize = src.Resize(new SKSizeI(dstWidth, CrnnDstHeight), SKFilterQuality.High))
             {
+#if DEBUG
+                using (var fs = new FileStream($"Recognizer_{Guid.NewGuid()}.png", FileMode.Create))
+                {
+                    srcResize.Encode(fs, SKEncodedImageFormat.Png, 100);
+                }
+#endif
+
                 inputTensors = OcrUtils.SubtractMeanNormalize(srcResize, MeanValues, NormValues);
             }
 
