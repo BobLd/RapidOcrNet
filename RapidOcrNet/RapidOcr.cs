@@ -19,11 +19,12 @@ namespace RapidOcrNet
         public void InitModels(int numThread = 0)
         {
             const string modelsFolderName = "models";
+            const string modelsVersion = "v5";
 
-            string detPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ch_PP-OCRv5_mobile_det.onnx"));
-            string clsPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ch_ppocr_mobile_v2.0_cls_infer.onnx"));
-            string recPath = Path.Combine(modelsFolderName, Path.Combine("v5", "latin_PP-OCRv5_rec_mobile_infer.onnx"));
-            string keysPath = Path.Combine(modelsFolderName, Path.Combine("v5", "ppocrv5_latin_dict.txt"));
+            string detPath = Path.Combine(modelsFolderName, modelsVersion, "ch_PP-OCRv5_mobile_det.onnx");
+            string clsPath = Path.Combine(modelsFolderName, modelsVersion, "ch_ppocr_mobile_v2.0_cls_infer.onnx");
+            string recPath = Path.Combine(modelsFolderName, modelsVersion, "latin_PP-OCRv5_rec_mobile_infer.onnx");
+            string keysPath = Path.Combine(modelsFolderName, modelsVersion, "ppocrv5_latin_dict.txt");
 
             InitModels(detPath, clsPath, recPath, keysPath, numThread);
         }
@@ -35,14 +36,14 @@ namespace RapidOcrNet
             _textRecognizer.InitModel(recPath, keysPath, numThread);
         }
 
-        public OcrResult Detect(string img, RapidOcrOptions options)
+        public OcrResult Detect(string path, RapidOcrOptions options)
         {
-            if (!File.Exists(img))
+            if (!File.Exists(path))
             {
-                throw new FileNotFoundException($"Could not find image to process: '{img}'.", img);
+                throw new FileNotFoundException($"Could not find image to process: '{path}'.", path);
             }
 
-            using (var originSrc = SKBitmap.Decode(img))
+            using (var originSrc = SKBitmap.Decode(path))
             {
                 return Detect(originSrc, options);
             }
@@ -80,13 +81,6 @@ namespace RapidOcrNet
             // step: dbNet getTextBoxes
             var textBoxes = _textDetector.GetTextBoxes(src, scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
             var dbNetTime = sw.ElapsedMilliseconds;
-
-//#if DEBUG
-//            foreach (var x in  textBoxes)
-//            {
-//                System.Diagnostics.Debug.WriteLine(x);
-//            }
-//#endif
 
             // getPartImages
             SKBitmap[] partImages = OcrUtils.GetPartImages(src, textBoxes).ToArray();

@@ -14,8 +14,8 @@ namespace RapidOcrNet
         private const int AngleDstHeight = 48;
         private const int AngleCols = 2;
 
-        private readonly float[] _meanValues = [127.5F, 127.5F, 127.5F];
-        private readonly float[] _normValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
+        private static readonly float[] MeanValues = [127.5F, 127.5F, 127.5F];
+        private static readonly float[] NormValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
 
         private InferenceSession _angleNet;
         private string _inputName;
@@ -80,8 +80,7 @@ namespace RapidOcrNet
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Tensor<float> inputTensors;
-            using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight),
-                       new SKSamplingOptions(SKCubicResampler.Mitchell)))
+            using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight), new SKSamplingOptions(SKCubicResampler.Mitchell)))
             {
 #if DEBUG
                 using (var fs = new FileStream($"Classifier_{Guid.NewGuid()}.png", FileMode.Create))
@@ -90,7 +89,7 @@ namespace RapidOcrNet
                 }
 #endif
 
-                inputTensors = OcrUtils.SubtractMeanNormalize(angleImg, _meanValues, _normValues);
+                inputTensors = OcrUtils.SubtractMeanNormalize(angleImg, MeanValues, NormValues);
             }
 
             IReadOnlyCollection<NamedOnnxValue> inputs = new NamedOnnxValue[]
@@ -102,7 +101,18 @@ namespace RapidOcrNet
             {
                 using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _angleNet.Run(inputs))
                 {
-                    ReadOnlySpan<float> outputData = results[0].AsEnumerable<float>().ToArray();
+                    var outputTensor = results[0];
+
+                    ReadOnlySpan<float> outputData;
+                    if (outputTensor.AsTensor<float>() is DenseTensor<float> dt)
+                    {
+                        outputData = dt.Buffer.Span;
+                    }
+                    else
+                    {
+                        outputData = outputTensor.AsEnumerable<float>().ToArray();
+                    }
+
                     var angle = ScoreToAngle(outputData, AngleCols);
                     angle.Time = sw.ElapsedMilliseconds;
                     return angle;

@@ -44,7 +44,7 @@ namespace RapidOcrNet.Tests
                 "img_10.jpg",
                 new string[]
                 {
-                    "Please lower your volume", // not correct but better than nothing
+                    "Please lower your volume",
                     "when you pass by",
                     "residential areas."
                 }
@@ -255,13 +255,14 @@ namespace RapidOcrNet.Tests
                 VisualDebugBbox(Path.ChangeExtension(path, "_ocr.png"), originSrc, ocrResult);
 
                 var actual = ocrResult.TextBlocks.Select(b => b.Chars).ToArray();
-
+                Assert.NotNull(actual);
                 Assert.Equal(expected.Length, actual.Length);
 
                 for (int s = 0; s < expected.Length; s++)
                 {
                     string expectedSentence = expected[s];
-                    string[] actualSentence = actual[s];
+                    string[]? actualSentence = actual[s];
+                    Assert.NotNull(actualSentence);
                     Assert.Equal(expectedSentence.Length, actualSentence.Length);
 
                     for (int c = 0; c < expectedSentence.Length; c++)
@@ -287,13 +288,16 @@ namespace RapidOcrNet.Tests
                 VisualDebugBbox(Path.ChangeExtension(path, "_ocr.png"), originSrc, ocrResult);
 
                 var actual = ocrResult.TextBlocks.Select(b => b.Chars).ToArray();
+                Assert.NotNull(actual);
 
                 Assert.Equal(expected.Length, actual.Length);
 
                 for (int s = 0; s < expected.Length; s++)
                 {
                     string expectedSentence = expected[s];
-                    string[] actualSentence = actual[s];
+                    
+                    string[]? actualSentence = actual[s];
+                    Assert.NotNull(actualSentence);
                     Assert.Equal(expectedSentence.Length, actualSentence.Length);
 
                     for (int c = 0; c < expectedSentence.Length; c++)

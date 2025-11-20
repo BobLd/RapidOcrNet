@@ -12,8 +12,8 @@ namespace RapidOcrNet
 {
     public sealed class TextRecognizer : IDisposable
     {
-        private readonly float[] MeanValues = [127.5F, 127.5F, 127.5F];
-        private readonly float[] NormValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
+        private static readonly float[] MeanValues = [127.5F, 127.5F, 127.5F];
+        private static readonly float[] NormValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
         private const int CrnnDstHeight = 48;
         //private const int CrnnCols = 6625;
 
@@ -103,10 +103,7 @@ namespace RapidOcrNet
                 using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _crnnNet.Run(inputs))
                 {
                     var result = results[0];
-                    var dimensions = result.AsTensor<float>().Dimensions;
-                    ReadOnlySpan<float> outputData = result.AsEnumerable<float>().ToArray();
-
-                    var tl = ScoreToTextLine(outputData, dimensions[1], dimensions[2]);
+                    var tl = ScoreToTextLine(result.AsTensor<float>());
                     tl.Time = sw.ElapsedMilliseconds;
                     return tl;
                 }
@@ -118,6 +115,47 @@ namespace RapidOcrNet
             }
 
             return new TextLine() { Time = sw.ElapsedMilliseconds };
+        }
+
+        private TextLine ScoreToTextLine(Tensor<float> srcData)
+        {
+            var dimensions = srcData.Dimensions;
+            int h = dimensions[1];
+            int w = dimensions[2];
+
+            int lastIndex = 0;
+            var scores = new List<float>();
+            var chars = new List<string>();
+
+            for (int i = 0; i < h; i++)
+            {
+                int maxIndex = 0;
+                float maxValue = -1000F;
+
+                for (int j = 0; j < w; j++)
+                {
+                    float v = srcData[0, i, j];
+                    if (v > maxValue)
+                    {
+                        maxIndex = j;
+                        maxValue = v;
+                    }
+                }
+
+                if (maxIndex > 0 && maxIndex < _keys.Length && !(i > 0 && maxIndex == lastIndex))
+                {
+                    scores.Add(maxValue);
+                    chars.Add(_keys[maxIndex]);
+                }
+
+                lastIndex = maxIndex;
+            }
+
+            return new TextLine
+            {
+                Chars = chars.ToArray(),
+                CharScores = scores.ToArray()
+            };
         }
 
         private TextLine ScoreToTextLine(ReadOnlySpan<float> srcData, int h, int w)

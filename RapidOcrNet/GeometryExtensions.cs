@@ -15,7 +15,7 @@ namespace RapidOcrNet
         /// <param name="point1">The first point.</param>
         /// <param name="point2">The second point.</param>
         /// <param name="point3">The third point.</param>
-        private static bool ccw(SKPoint point1, SKPoint point2, SKPoint point3)
+        private static bool ccw(in SKPoint point1, in SKPoint point2, in SKPoint point3)
         {
             return (point2.X - point1.X) * (point3.Y - point1.Y) > (point2.Y - point1.Y) * (point3.X - point1.X);
         }
@@ -56,7 +56,10 @@ namespace RapidOcrNet
             Array.Sort(points, PdfPointXYComparer.Instance);
 
             var P0 = points[0];
-            var groups = points.Skip(1).GroupBy(p => polarAngle(P0, p)).OrderBy(g => g.Key).ToArray();
+            var groups = points.Skip(1)
+                .GroupBy(p => polarAngle(P0, p))
+                .OrderBy(g => g.Key)
+                .ToArray();
 
             var sortedPoints = ArrayPool<SKPoint>.Shared.Rent(groups.Length);
 
@@ -95,7 +98,7 @@ namespace RapidOcrNet
                 for (int i = 2; i < groups.Length; i++)
                 {
                     var point = sortedPoints[i];
-                    while (stack.Count > 1 && !ccw(stack.ElementAt(1), stack.Peek(), point))
+                    while (stack.Count > 1 && !ccw(stack.ElementAt(1), stack.Peek(), in point))
                     {
                         stack.Pop();
                     }
@@ -270,7 +273,6 @@ namespace RapidOcrNet
         public static void GetSize(SKPoint[] points, out float width, out float height)
         {
             SKPoint topLeft = points[0];
-            //PointF topRight = points[1];
             SKPoint bottomLeft = points[2];
             SKPoint bottomRight = points[3];
 

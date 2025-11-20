@@ -2,7 +2,7 @@
 // Adapted from RapidAI / RapidOCR
 // https://github.com/RapidAI/RapidOCR/blob/92aec2c1234597fa9c3c270efd2600c83feecd8d/dotnet/RapidOcrOnnxCs/OcrLib/DbNet.cs
 
-using System.Runtime.InteropServices;
+using System.Buffers;
 using Clipper2Lib;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -12,11 +12,24 @@ namespace RapidOcrNet
 {
     public sealed class TextDetector : IDisposable
     {
-        private readonly float[] MeanValues = [0.485F * 255F, 0.456F * 255F, 0.406F * 255F];
-        private readonly float[] NormValues = [1.0F / 0.229F / 255.0F, 1.0F / 0.224F / 255.0F, 1.0F / 0.225F / 255.0F];
+        private const float DilateRadius = 1f;
+        private readonly SKPaint _dilatePaint;
+        private readonly SKImageFilter _dilateFilter;
+
+        private static readonly float[] MeanValues = [0.485F * 255F, 0.456F * 255F, 0.406F * 255F];
+        private static readonly float[] NormValues = [1.0F / 0.229F / 255.0F, 1.0F / 0.224F / 255.0F, 1.0F / 0.225F / 255.0F];
 
         private InferenceSession _dbNet;
         private string _inputName;
+
+        public TextDetector()
+        {
+            _dilateFilter = SKImageFilter.CreateDilate(DilateRadius, DilateRadius);
+            _dilatePaint = new SKPaint
+            {
+                ImageFilter = _dilateFilter
+            };
+        }
 
         public void InitModel(string path, int numThread)
         {
@@ -36,7 +49,7 @@ namespace RapidOcrNet
             _inputName = _dbNet.InputMetadata.Keys.First();
         }
 
-        public IReadOnlyList<TextBox> GetTextBoxes(SKBitmap src, ScaleParam scale, float boxScoreThresh, float boxThresh,
+        public IReadOnlyList<TextBox>? GetTextBoxes(SKBitmap src, ScaleParam scale, float boxScoreThresh, float boxThresh,
             float unClipRatio)
         {
             Tensor<float> inputTensors;
@@ -73,14 +86,32 @@ namespace RapidOcrNet
             return null;
         }
 
-        private static SKPoint[][] FindContours(byte[] array, int rows, int cols)
+        private static SKPoint[][] FindContours(ReadOnlySpan<byte> array, int rows, int cols)
         {
-            Span<int> v = Array.ConvertAll(array, c => (int)c);
-            var contours = PContour.FindContours(v, cols, rows);
-            return contours
-                .Where(c => !c.isHole)
-                .Select(c => PContour.ApproxPolyDP(c.GetSpan(), 1).ToArray())
-                .ToArray();
+            int[]? vPool = null;
+            try
+            {
+                Span<int> v = array.Length <= 256 ? stackalloc int[array.Length] : vPool = ArrayPool<int>.Shared.Rent(array.Length);
+
+                for (int i = 0; i < array.Length; i++)
+                {
+                    v[i] = array[i];
+                }
+
+                var contours = PContour.FindContours(v, cols, rows);
+
+                return contours
+                    .Where(c => !c.isHole)
+                    .Select(c => PContour.ApproxPolyDP(c.GetSpan(), 1).ToArray())
+                    .ToArray();
+            }
+            finally
+            {
+                if (vPool is not null)
+                {
+                    ArrayPool<int>.Shared.Return(vPool);
+                }
+            }
         }
 
         private static bool TryFindIndex(Dictionary<int, int> link, int offset, out int index)
@@ -96,13 +127,22 @@ namespace RapidOcrNet
             return found;
         }
 
-        private static IReadOnlyList<TextBox> GetTextBoxes(DisposableNamedOnnxValue outputTensor, int rows, int cols, ScaleParam s, float boxScoreThresh, float boxThresh, float unClipRatio)
+        private IReadOnlyList<TextBox> GetTextBoxes(DisposableNamedOnnxValue outputTensor, int rows, int cols,
+            ScaleParam s, float boxScoreThresh, float boxThresh, float unClipRatio)
         {
             const float maxSideThresh = 3.0f; // Long Edge Threshold
             var rsBoxes = new List<TextBox>();
 
             // Data preparation
-            ReadOnlySpan<float> predData = outputTensor.AsEnumerable<float>().ToArray();
+            ReadOnlySpan<float> predData;
+            if (outputTensor.AsTensor<float>() is DenseTensor<float> dt)
+            {
+                predData = dt.Buffer.Span;
+            }
+            else
+            {
+                predData = outputTensor.AsEnumerable<float>().ToArray();
+            }
 
             var gray8 = new SKImageInfo()
             {
@@ -112,108 +152,84 @@ namespace RapidOcrNet
                 ColorType = SKColorType.Gray8
             };
 
-            var crop = new SKRectI(0, 0, cols, rows);
+            using var predImage = new SKBitmap(gray8);
+            using var thresholdMatBitmap = new SKBitmap(gray8);
 
-            Span<byte> thresholdMat = new byte[predData.Length];
-            Span<byte> cbufMat = new byte[predData.Length];
+            SKPoint[][] contours;
+
+            Span<byte> cbufMat = predImage.GetPixelSpan();
+            Span<byte> thresholdMat = thresholdMatBitmap.GetPixelSpan();
 
             for (int i = 0; i < predData.Length; i++)
             {
-                var f = predData[i];
+                float f = predData[i];
                 cbufMat[i] = Convert.ToByte(f * 255);
                 thresholdMat[i] = f > boxThresh ? (byte)1 : (byte)0; // Thresholding
             }
 
-            const float dilateRadius = 1f;
-
-            SKPoint[][] contours;
-            using (var skImage = SKImage.FromPixelCopy(gray8, thresholdMat))
-            using (var dilateFilter = SKImageFilter.CreateDilate(dilateRadius, dilateRadius))
-            using (var dilated = skImage.ApplyImageFilter(dilateFilter, crop, crop, out SKRectI _, out SKPointI _)) // Dilate
-            using (var dilateMat = dilated.Subset(crop)) // Trim image due to dilate
+            using (var canvas = new SKCanvas(thresholdMatBitmap))
             {
-//#if DEBUG
-//                using (var skImage2 = SKImage.FromPixelCopy(gray8, cbufMat))
-//                using (var bmp = SKBitmap.FromImage(skImage2))
-//                using (var fs = new FileStream($"result_{Guid.NewGuid()}.png", FileMode.Create))
-//                {
-//                    bmp.Encode(fs, SKEncodedImageFormat.Png, 100);
-//                }
-//#endif
+                canvas.DrawBitmap(thresholdMatBitmap, 0, 0, _dilatePaint);
+                // TODO - Check dilate by rendering thresholdMatBitmap to file
 
-                nint buffer = Marshal.AllocHGlobal(gray8.BytesSize);
-                try
-                {
-                    dilateMat.ReadPixels(gray8, buffer);
-                    byte[] bytes = new byte[thresholdMat.Length];
-
-                    Marshal.Copy(buffer, bytes, 0, thresholdMat.Length);
-
-                    contours = FindContours(bytes, rows, cols);
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(buffer);
-                }
+                contours = FindContours(thresholdMat, rows, cols);
             }
 
-            using (SKImage predImage = SKImage.FromPixelCopy(gray8, cbufMat))
+            for (int i = 0; i < contours.Length; i++)
             {
-                for (int i = 0; i < contours.Length; i++)
+                var contour = contours[i];
+                if (contour.Length <= 2)
                 {
-                    var contour = contours[i];
-                    if (contour.Length <= 2)
-                    {
-                        continue;
-                    }
-
-                    SKPoint[] minBox = GetMiniBox(contour, out float maxSide);
-                    if (maxSide < maxSideThresh)
-                    {
-                        continue;
-                    }
-
-                    double score = GetScore(contour, predImage);
-                    if (score < boxScoreThresh)
-                    {
-                        continue;
-                    }
-
-                    SKPoint[]? clipBox = Unclip(minBox, unClipRatio);
-                    if (clipBox is null)
-                    {
-                        continue;
-                    }
-
-                    ReadOnlySpan<SKPoint> clipMinBox = GetMiniBox(clipBox, out maxSide);
-                    if (maxSide < maxSideThresh + 2)
-                    {
-                        continue;
-                    }
-
-                    var finalPoints = new SKPointI[clipMinBox.Length];
-                    for (int j = 0; j < clipMinBox.Length; j++)
-                    {
-                        var item = clipMinBox[j];
-                        int x = (int)(item.X / s.ScaleWidth);
-                        int ptx = Math.Min(Math.Max(x, 0), s.SrcWidth);
-
-                        int y = (int)(item.Y / s.ScaleHeight);
-                        int pty = Math.Min(Math.Max(y, 0), s.SrcHeight);
-
-                        finalPoints[j] = new SKPointI(ptx, pty);
-                    }
-
-                    var textBox = new TextBox
-                    {
-                        Score = (float)score,
-                        Points = finalPoints
-                    };
-                    rsBoxes.Add(textBox);
+                    continue;
                 }
+
+                SKPoint[] minBox = GetMiniBox(contour, out float maxSide);
+                if (maxSide < maxSideThresh)
+                {
+                    continue;
+                }
+
+                double score = GetScore(contour, predImage);
+                if (score < boxScoreThresh)
+                {
+                    continue;
+                }
+
+                SKPoint[]? clipBox = Unclip(minBox, unClipRatio);
+                if (clipBox is null)
+                {
+                    continue;
+                }
+
+                ReadOnlySpan<SKPoint> clipMinBox = GetMiniBox(clipBox, out maxSide);
+                if (maxSide < maxSideThresh + 2)
+                {
+                    continue;
+                }
+
+                var finalPoints = new SKPointI[clipMinBox.Length];
+
+                for (int j = 0; j < clipMinBox.Length; j++)
+                {
+                    var item = clipMinBox[j];
+                    int x = (int)(item.X / s.ScaleWidth);
+                    int ptx = Math.Min(Math.Max(x, 0), s.SrcWidth);
+
+                    int y = (int)(item.Y / s.ScaleHeight);
+                    int pty = Math.Min(Math.Max(y, 0), s.SrcHeight);
+
+                    finalPoints[j] = new SKPointI(ptx, pty);
+                }
+
+                var textBox = new TextBox
+                {
+                    Score = (float)score,
+                    Points = finalPoints
+                };
+
+                rsBoxes.Add(textBox);
             }
 
-            //rsBoxes.Reverse();
             return rsBoxes;
         }
 
@@ -253,7 +269,7 @@ namespace RapidOcrNet
                 index3 = 2;
             }
 
-            return new SKPoint[] { points[index1], points[index2], points[index3], points[index4] };
+            return [points[index1], points[index2], points[index3], points[index4]];
         }
 
         public static int CompareByX(SKPoint left, SKPoint right)
@@ -271,7 +287,7 @@ namespace RapidOcrNet
             return -1;
         }
 
-        private static double GetScore(SKPoint[] contours, SKImage fMapMat)
+        private static double GetScore(SKPoint[] contours, SKBitmap fMapMat)
         {
             short xmin = 9999;
             short xmax = 0;
@@ -302,6 +318,26 @@ namespace RapidOcrNet
                         ymax = (short)point.Y;
                     }
                 }
+                
+                // The cropped destBitmap shares the underlying pixel buffer with the source, so changes
+                // to either will affect both unless you copy it.
+                var roiBitmap = new SKBitmap();
+                if (!fMapMat.ExtractSubset(roiBitmap, new SKRectI(xmin - 1, ymin - 1, xmax, ymax)))
+                {
+                    throw new Exception("Could not extract subset of image.");
+                }
+
+                // NB: roiBitmap's byte size is not as expected, and bytes cannot be accessed correctly by index
+                // because of that.
+                // See the difference in size between `roiBitmap.ByteCount` and `roiBitmap.PeekPixels().BytesSize`.
+                // We cannot access bytes correctly via `roiBitmap.PeekPixels()` either because the byte order seems
+                // to be different.
+                //
+                // The only correct way to access byte values seems to be through `roiBitmap.Pixels`, which might
+                // be slower.
+
+                double sum = 0;
+                int count = 0;
 
                 int roiWidth = xmax - xmin + 1;
                 int roiHeight = ymax - ymin + 1;
@@ -314,31 +350,9 @@ namespace RapidOcrNet
                     ColorType = SKColorType.Gray8
                 };
 
-                byte[] roiBitmapBytes = new byte[gray8.BytesSize];
-
-                using (SKImage roiBitmap = fMapMat.Subset(new SKRectI(xmin - 1, ymin - 1, xmax, ymax)))
-                {
-                    System.Diagnostics.Debug.Assert(roiBitmap.Width.Equals(roiWidth));
-                    System.Diagnostics.Debug.Assert(roiBitmap.Height.Equals(roiHeight));
-
-                    nint buffer = Marshal.AllocHGlobal(gray8.BytesSize);
-                    try
-                    {
-                        roiBitmap.ReadPixels(gray8, buffer);
-                        Marshal.Copy(buffer, roiBitmapBytes, 0, gray8.BytesSize);
-                    }
-                    finally
-                    {
-                        Marshal.FreeHGlobal(buffer);
-                    }
-                }
-
-                double sum = 0;
-                int count = 0;
-
-                using (SKBitmap mask = new SKBitmap(gray8))
-                using (SKCanvas canvas = new SKCanvas(mask))
-                using (SKPaint maskPaint = new SKPaint())
+                using (var mask = new SKBitmap(gray8))
+                using (var canvas = new SKCanvas(mask))
+                using (var maskPaint = new SKPaint())
                 {
                     maskPaint.Color = SKColors.White;
                     maskPaint.Style = SKPaintStyle.Fill;
@@ -359,16 +373,16 @@ namespace RapidOcrNet
                         canvas.DrawPath(path, maskPaint);
                     }
 
-//#if DEBUG
-//                    using (var fs = new FileStream($"mask_{Guid.NewGuid()}.png", FileMode.Create))
-//                    {
-//                        mask.Encode(fs, SKEncodedImageFormat.Png, 100);
-//                    }
-//#endif
+                    //#if DEBUG
+                    //  using (var fs = new FileStream($"mask_{Guid.NewGuid()}.png", FileMode.Create))
+                    //  {
+                    //      mask.Encode(fs, SKEncodedImageFormat.Png, 100);
+                    //  }
+                    //#endif
 
                     ReadOnlySpan<byte> maskSpan = mask.GetPixelSpan();
                     
-                    System.Diagnostics.Debug.WriteLine(maskSpan.Length.Equals(roiBitmapBytes.Length));
+                    System.Diagnostics.Debug.Assert(maskSpan.Length.Equals(roiBitmap.Pixels.Length));
 
                     for (int i = 0; i < maskSpan.Length; i++)
                     {
@@ -376,7 +390,8 @@ namespace RapidOcrNet
                         {
                             continue;
                         }
-                        sum += roiBitmapBytes[i];
+
+                        sum += roiBitmap.Pixels[i].Red; // Access via Pixels to get correct byte value
                         count++;
                     }
                 }
@@ -385,6 +400,7 @@ namespace RapidOcrNet
                 {
                     return 0;
                 }
+
                 return sum / count / byte.MaxValue;
             }
             catch (Exception ex)
@@ -483,6 +499,8 @@ namespace RapidOcrNet
         public void Dispose()
         {
             _dbNet.Dispose();
+            _dilatePaint.Dispose();
+            _dilateFilter.Dispose();
         }
     }
 }

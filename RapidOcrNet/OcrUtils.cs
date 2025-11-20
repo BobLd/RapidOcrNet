@@ -11,13 +11,16 @@ namespace RapidOcrNet
     {
         public static Tensor<float> SubtractMeanNormalize(SKBitmap src, float[] meanVals, float[] normVals)
         {
+            const int index = 0; // Corresponds to index in batch (currently a single image per batch)
+            const int batchSize = 1;
+
             int cols = src.Width;
             int rows = src.Height;
             int channels = src.BytesPerPixel;
 
             const int expChannels = 3; // Size of meanVals, we ignore alpha channel
 
-            Tensor<float> inputTensor = new DenseTensor<float>([1, expChannels, rows, cols]);
+            Tensor<float> inputTensor = new DenseTensor<float>([batchSize, expChannels, rows, cols]);
 
             ReadOnlySpan<byte> span = src.GetPixelSpan();
 
@@ -29,9 +32,9 @@ namespace RapidOcrNet
                     {
                         int i = r * cols + c;
                         byte value = span[i * channels];
-                        inputTensor[0, 0, r, c] = (value - meanVals[0]) * normVals[0];
-                        inputTensor[0, 1, r, c] = (value - meanVals[1]) * normVals[1];
-                        inputTensor[0, 2, r, c] = (value - meanVals[2]) * normVals[2];
+                        inputTensor[index, 0, r, c] = (value - meanVals[0]) * normVals[0];
+                        inputTensor[index, 1, r, c] = (value - meanVals[1]) * normVals[1];
+                        inputTensor[index, 2, r, c] = (value - meanVals[2]) * normVals[2];
                     }
                 }
             }
@@ -45,7 +48,7 @@ namespace RapidOcrNet
                         for (int ch = 0; ch < expChannels; ++ch)
                         {
                             byte value = span[i * channels + ch];
-                            inputTensor[0, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
+                            inputTensor[index, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
                         }
                     }
                 }
@@ -98,15 +101,20 @@ namespace RapidOcrNet
             return minSize / 1000 + 2;
         }
 
-        public static IEnumerable<SKBitmap> GetPartImages(SKBitmap src, IReadOnlyList<TextBox> textBoxes)
+        public static IEnumerable<SKBitmap> GetPartImages(SKBitmap src, IReadOnlyList<TextBox>? textBoxes)
         {
+            if (textBoxes is null || textBoxes.Count == 0)
+            {
+                yield break;
+            }
+
             for (int i = 0; i < textBoxes.Count; ++i)
             {
                 yield return GetRotateCropImage(src, textBoxes[i].Points);
             }
         }
 
-        public static SKMatrix GetPerspectiveTransform(SKPoint topLeft, SKPoint topRight, SKPoint botRight, SKPoint botLeft,
+        public static SKMatrix GetPerspectiveTransform(in SKPointI topLeft, in SKPointI topRight, in SKPointI botRight, in SKPointI botLeft,
             float width, float height)
         {
             // https://stackoverflow.com/questions/48416118/perspective-transform-in-skia
@@ -134,14 +142,20 @@ namespace RapidOcrNet
             float persp2 = 1;
 
             var persp = new SKMatrix(scaleX, skewX, transX, skewY, scaleY, transY, persp0, persp1, persp2);
+
             return persp.TryInvert(out SKMatrix perspInv) ? perspInv : SKMatrix.Identity; // TODO - Check what's best to return when not inv
         }
 
         public static SKBitmap GetRotateCropImage(SKBitmap src, SKPointI[] box)
         {
             System.Diagnostics.Debug.Assert(box.Length == 4);
-            Span<SKPointI> points = stackalloc SKPointI[] { box[0], box[1], box[2], box[3] }; // Clone points
-            ReadOnlySpan<int> collectX = stackalloc int[] { box[0].X, box[1].X, box[2].X, box[3].X };
+
+            SKPointI b0 = box[0];
+            SKPointI b1 = box[1];
+            SKPointI b2 = box[2];
+            SKPointI b3 = box[3];
+
+            ReadOnlySpan<int> collectX = stackalloc int[] { b0.X, b1.X, b2.X, b3.X };
             int left = int.MaxValue;
             int right = int.MinValue;
             foreach (var v in collectX)
@@ -156,7 +170,7 @@ namespace RapidOcrNet
                 }
             }
 
-            ReadOnlySpan<int> collectY = stackalloc int[] { box[0].Y, box[1].Y, box[2].Y, box[3].Y };
+            ReadOnlySpan<int> collectY = stackalloc int[] { b0.Y, b1.Y, b2.Y, b3.Y };
             int top = int.MaxValue;
             int bottom = int.MinValue;
             foreach (var v in collectY)
@@ -183,31 +197,26 @@ namespace RapidOcrNet
                 throw new Exception("Could not extract image subset.");
             }
 
-            ref SKPointI p0 = ref points[0];
+            ref SKPointI p0 = ref b0;
             p0.X -= left;
             p0.Y -= top;
 
-            ref SKPointI p1 = ref points[1];
+            ref SKPointI p1 = ref b1;
             p1.X -= left;
             p1.Y -= top;
 
-            ref SKPointI p2 = ref points[2];
+            ref SKPointI p2 = ref b2;
             p2.X -= left;
             p2.Y -= top;
 
-            ref SKPointI p3 = ref points[3];
+            ref SKPointI p3 = ref b3;
             p3.X -= left;
             p3.Y -= top;
 
             int imgCropWidth = (int)Math.Sqrt((p0.X - p1.X) * (p0.X - p1.X) + (p0.Y - p1.Y) * (p0.Y - p1.Y));
             int imgCropHeight = (int)Math.Sqrt((p0.X - p3.X) * (p0.X - p3.X) + (p0.Y - p3.Y) * (p0.Y - p3.Y));
 
-            var ptsSrc0Sk = new SKPoint(p0.X, p0.Y);
-            var ptsSrc1Sk = new SKPoint(p1.X, p1.Y);
-            var ptsSrc2Sk = new SKPoint(p2.X, p2.Y);
-            var ptsSrc3Sk = new SKPoint(p3.X, p3.Y);
-
-            var m = GetPerspectiveTransform(ptsSrc0Sk, ptsSrc1Sk, ptsSrc2Sk, ptsSrc3Sk, imgCropWidth, imgCropHeight);
+            var m = GetPerspectiveTransform(in p0, in p1, in p2, in p3, imgCropWidth, imgCropHeight);
 
             if (m.IsIdentity)
             {
@@ -234,14 +243,7 @@ namespace RapidOcrNet
                 canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
                 canvas.Restore();
             }
-
-            //#if DEBUG
-            //            using (var fs = new FileStream($"perspective_{Guid.NewGuid()}.png", FileMode.Create))
-            //            {
-            //                partImg.Encode(fs, SKEncodedImageFormat.Png, 100);
-            //            }
-            //#endif
-
+            
             if (partImg.Height >= partImg.Width * 1.5)
             {
                 return BitmapRotateClockWise90(partImg);
@@ -287,12 +289,7 @@ namespace RapidOcrNet
                 canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
                 canvas.Restore();
             }
-            /*
-            using (var fs = new FileStream("rotated.png", FileMode.Create))
-            {
-                rotated.Encode(fs, SKEncodedImageFormat.Png, 100);
-            }
-            */
+
             return rotated;
         }
     }

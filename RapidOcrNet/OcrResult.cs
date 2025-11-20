@@ -39,6 +39,11 @@ namespace RapidOcrNet
 
         public override string ToString()
         {
+            if (Chars is null || CharScores is null)
+            {
+                return "TextLine[No Data]";
+            }
+
             return $"TextLine[Text({string.Concat(Chars)}),CharScores({string.Join(",", CharScores)}),Time({Time}ms)]";
         }
     }
@@ -50,13 +55,18 @@ namespace RapidOcrNet
         public int AngleIndex { get; init; }
         public float AngleScore { get; init; }
         public float AngleTime { get; init; }
-        public required string[] Chars { get; init; }
-        public required float[] CharScores { get; init; }
+        public required string[]? Chars { get; init; }
+        public required float[]? CharScores { get; init; }
         public float CrnnTime { get; init; }
         public float BlockTime { get; init; }
 
         public string GetText()
         {
+            if (Chars is null)
+            {
+                return string.Empty;
+            }
+
             return string.Concat(Chars);
         }
 
@@ -71,7 +81,7 @@ namespace RapidOcrNet
             string angle = $"│   ├──{header}[Index({AngleIndex}), Score({AngleScore}), Time({AngleTime}ms)]";
             sb.AppendLine(angle);
 
-            string textLine = $"│   ├──TextLine[Text({GetText()}),CharScores({string.Join(",", CharScores)}),Time({CrnnTime}ms)]";
+            string textLine = $"│   ├──TextLine[Text({GetText()}),CharScores({string.Join(",", CharScores ?? [])}),Time({CrnnTime}ms)]";
             sb.AppendLine(textLine);
             sb.AppendLine($"│   └──BlockTime({BlockTime}ms)");
             return sb.ToString();
