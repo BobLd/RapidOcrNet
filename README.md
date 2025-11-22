@@ -1,6 +1,8 @@
 # RapidOcrNet
 Cross-platform OCR processing library using PaddleOCR ONNX models, and based on original code from RapidAI's [RapidOCR](https://github.com/RapidAI/RapidOCR).
 
+Available as NuGet package here https://www.nuget.org/packages/RapidOcrNet/
+
 The code was optimised to remove dependencies on `System.Drawing` and `OpenCV`. The image processing is now done only using `SkiaSharp` and `PContourNet`.
 
 The project now uses PP-OCR v5 models, but v4 and v3 models are also supported (see [here](https://github.com/BobLd/RapidOcrNet/issues/3)).
