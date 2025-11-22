@@ -4,7 +4,25 @@
 		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+		<IsAotCompatible>true</IsAotCompatible>
+		<Version>1.0.0</Version>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<Authors>BobLd;RapidOCR</Authors>
+		<PackageTags>OCR;RapidOCR;PaddleOCR;PP-OCRv5;PPOCRv5;Document;skia;skiasharp;onnx;image</PackageTags>
+		<RepositoryUrl>https://github.com/BobLd/RapidOcrNet</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/BobLd/RapidOcrNet</PackageProjectUrl>
+		<Description>Lightweight cross-platform OCR processing library using PaddleOCR ONNX PP-OCR v5 models, and based on original code from RapidAI's RapidOCR.</Description>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+		<PackageId>RapidOcrNet</PackageId>
+		<Title>RapidOcrNet</Title>
+		<Product>RapidOcrNet</Product>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<SignAssembly>True</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\RapidOcrNet.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -32,6 +50,20 @@
 
 	<ItemGroup>
 		<Folder Include="models\NewFolder\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="RapidOcrNet.targets" PackagePath="build/RapidOcrNet.targets" />
+		<Content Include="models\v5\*.*" Pack="true" PackagePath="models\v5">
+			<PackageCopyToOutput>true</PackageCopyToOutput>
+		</Content>
 	</ItemGroup>
 
 </Project>

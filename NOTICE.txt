@@ -8,6 +8,4 @@ The dependency on OpenCV was removed thanks to the PContour library and its C# p
 	- https://github.com/LingDong-/PContour
 	- https://github.com/BobLd/PContourNet
 
-The models made available are from the PaddleOCR project (Apache-2.0 license) and were converted to ONNX using the Paddle2ONNX tool.
-	- https://paddlepaddle.github.io/PaddleOCR/en/ppocr/model_list.html
-	- https://github.com/PaddlePaddle/Paddle2ONNX
+The models made available are from the PaddleOCR project (Apache-2.0 license) and were downloaded from https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml

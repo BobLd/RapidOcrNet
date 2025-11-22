@@ -1,0 +1,15 @@
+﻿<Project>
+
+	<ItemGroup>
+		<Models Include="$(MSBuildThisFileDirectory)\..\models\v5\*.*" />
+	</ItemGroup>
+
+	<Target Name="CopyModelsBuild" AfterTargets="Build">
+		<Copy SourceFiles="@(Models)" DestinationFolder="$(TargetDir)models\v5\" />
+	</Target>
+
+	<Target Name="CopyModelsPublish" AfterTargets="Publish">
+		<Copy SourceFiles="@(Models)" DestinationFolder="$(PublishDir)models\v5\" />
+	</Target>
+
+</Project>
