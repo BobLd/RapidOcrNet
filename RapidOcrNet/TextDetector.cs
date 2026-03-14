@@ -100,10 +100,15 @@ namespace RapidOcrNet
 
                 var contours = PContour.FindContours(v, cols, rows);
 
-                return contours
-                    .Where(c => !c.isHole)
-                    .Select(c => PContour.ApproxPolyDP(c.GetSpan(), 1).ToArray())
-                    .ToArray();
+                var result = new List<SKPoint[]>(contours.Count);
+                foreach (var c in contours)
+                {
+                    if (!c.isHole)
+                    {
+                        result.Add(PContour.ApproxPolyDP(c.GetSpan(), 1).ToArray());
+                    }
+                }
+                return result.ToArray();
             }
             finally
             {
@@ -163,7 +168,7 @@ namespace RapidOcrNet
             for (int i = 0; i < predData.Length; i++)
             {
                 float f = predData[i];
-                cbufMat[i] = Convert.ToByte(f * 255);
+                cbufMat[i] = (byte)MathF.Round(f * 255f);
                 thresholdMat[i] = f > boxThresh ? (byte)1 : (byte)0; // Thresholding
             }
 
@@ -419,7 +424,11 @@ namespace RapidOcrNet
                 return null;
             }
 
-            var theClipperPts = new Path64(box.Select(pt => new Point64(pt.X, pt.Y)));
+            var theClipperPts = new Path64(box.Length);
+            for (int i = 0; i < box.Length; ++i)
+            {
+                theClipperPts.Add(new Point64(box[i].X, box[i].Y));
+            }
 
             float area = MathF.Abs(SignedPolygonArea(box));
             double length = LengthOfPoints(box);

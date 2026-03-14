@@ -17,6 +17,7 @@ namespace RapidOcrNet
             int cols = src.Width;
             int rows = src.Height;
             int channels = src.BytesPerPixel;
+            int rowBytes = src.RowBytes; // Use actual row stride (may include padding)
 
             const int expChannels = 3; // Size of meanVals, we ignore alpha channel
 
@@ -26,15 +27,17 @@ namespace RapidOcrNet
 
             if (src.Info.ColorType == SKColorType.Gray8)
             {
+                float mean0 = meanVals[0], mean1 = meanVals[1], mean2 = meanVals[2];
+                float norm0 = normVals[0], norm1 = normVals[1], norm2 = normVals[2];
                 for (int r = 0; r < rows; ++r)
                 {
+                    int rowBase = r * rowBytes;
                     for (int c = 0; c < cols; ++c)
                     {
-                        int i = r * cols + c;
-                        byte value = span[i * channels];
-                        inputTensor[index, 0, r, c] = (value - meanVals[0]) * normVals[0];
-                        inputTensor[index, 1, r, c] = (value - meanVals[1]) * normVals[1];
-                        inputTensor[index, 2, r, c] = (value - meanVals[2]) * normVals[2];
+                        byte value = span[rowBase + c];
+                        inputTensor[index, 0, r, c] = (value - mean0) * norm0;
+                        inputTensor[index, 1, r, c] = (value - mean1) * norm1;
+                        inputTensor[index, 2, r, c] = (value - mean2) * norm2;
                     }
                 }
             }
@@ -42,12 +45,13 @@ namespace RapidOcrNet
             {
                 for (int r = 0; r < rows; ++r)
                 {
+                    int rowBase = r * rowBytes;
                     for (int c = 0; c < cols; ++c)
                     {
-                        int i = r * cols + c;
+                        int pixelBase = rowBase + c * channels;
                         for (int ch = 0; ch < expChannels; ++ch)
                         {
-                            byte value = span[i * channels + ch];
+                            byte value = span[pixelBase + ch];
                             inputTensor[index, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
                         }
                     }
@@ -57,7 +61,6 @@ namespace RapidOcrNet
             {
                 throw new ArgumentException($"This image needs to be '{SKColorType.Bgra8888}' or '{SKColorType.Gray8}', but got '{src.Info.ColorType}'.");
             }
-
 
             return inputTensor;
         }
@@ -76,13 +79,10 @@ namespace RapidOcrNet
 
             SKBitmap newBmp = new SKBitmap(info);
             using (var canvas = new SKCanvas(newBmp))
-            using (var paint = new SKPaint())
             using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = false;
-
                 canvas.Clear(SKColors.White);
-                canvas.DrawImage(image, padding, padding, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
+                canvas.DrawImage(image, padding, padding, new SKSamplingOptions(SKCubicResampler.Mitchell));
             }
 
 #if DEBUG
@@ -222,7 +222,9 @@ namespace RapidOcrNet
             {
                 if (imgCrop.Height >= imgCrop.Width * 1.5)
                 {
-                    return BitmapRotateClockWise90(imgCrop);
+                    var rotated90 = BitmapRotateClockWise90(imgCrop);
+                    imgCrop.Dispose();
+                    return rotated90;
                 }
 
                 return imgCrop;
@@ -234,19 +236,19 @@ namespace RapidOcrNet
 
             var partImg = new SKBitmap(info2);
             using (var canvas = new SKCanvas(partImg))
-            using (var paint = new SKPaint())
             using (var image = SKImage.FromBitmap(imgCrop))
             {
-                paint.IsAntialias = false;
-
                 canvas.SetMatrix(m);
-                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
+                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell));
                 canvas.Restore();
             }
-            
+            imgCrop.Dispose();
+
             if (partImg.Height >= partImg.Width * 1.5)
             {
-                return BitmapRotateClockWise90(partImg);
+                var rotated90 = BitmapRotateClockWise90(partImg);
+                partImg.Dispose();
+                return rotated90;
             }
 
             return partImg;
@@ -255,16 +257,13 @@ namespace RapidOcrNet
         public static SKBitmap BitmapRotateClockWise180(SKBitmap src)
         {
             var rotated = new SKBitmap(src.Info);
-            
+
             using (var canvas = new SKCanvas(rotated))
-            using (var paint = new SKPaint())
             using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = false;
-
                 canvas.Translate(rotated.Width, rotated.Height);
                 canvas.RotateDegrees(180);
-                canvas.DrawImage(image,0,0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
+                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell));
                 canvas.Restore();
             }
 
@@ -279,14 +278,11 @@ namespace RapidOcrNet
             var rotated = new SKBitmap(info);
 
             using (var canvas = new SKCanvas(rotated))
-            using (var paint = new SKPaint())
             using (var image = SKImage.FromBitmap(src))
             {
-                paint.IsAntialias = false;
-
                 canvas.Translate(rotated.Width, 0);
                 canvas.RotateDegrees(90);
-                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
+                canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKCubicResampler.Mitchell));
                 canvas.Restore();
             }
 

@@ -93,7 +93,9 @@ namespace RapidOcrNet
             {
                 if (angles[i].Index == 1)
                 {
-                    partImages[i] = OcrUtils.BitmapRotateClockWise180(partImages[i]);
+                    var original = partImages[i];
+                    partImages[i] = OcrUtils.BitmapRotateClockWise180(original);
+                    original.Dispose();
                 }
             }
 

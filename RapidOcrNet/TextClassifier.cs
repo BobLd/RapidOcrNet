@@ -50,7 +50,11 @@ namespace RapidOcrNet
                 // Most Possible AngleIndex
                 if (mostAngle)
                 {
-                    double sum = angles.Sum(x => x.Index);
+                    int sum = 0;
+                    foreach (var a in angles)
+                    {
+                        sum += a.Index;
+                    }
                     double halfPercent = angles.Length / 2.0f;
 
                     int mostAngleIndex = sum < halfPercent ? 0 : 1; // All angles set to 0 or 1

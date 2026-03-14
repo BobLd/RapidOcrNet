@@ -25,6 +25,7 @@
 
 // See https://github.com/BobLd/PContourNet
 
+using System.Runtime.InteropServices;
 using SkiaSharp;
 
 namespace RapidOcrNet
@@ -203,7 +204,7 @@ namespace RapidOcrNet
             {
                 ArgumentNullException.ThrowIfNull(points, nameof(points));
 
-                return points.ToArray();
+                return CollectionsMarshal.AsSpan(points);
             }
         }
 
