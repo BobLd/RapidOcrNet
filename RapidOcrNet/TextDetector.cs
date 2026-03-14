@@ -327,15 +327,6 @@ namespace RapidOcrNet
                     throw new Exception("Could not extract subset of image.");
                 }
 
-                // NB: roiBitmap's byte size is not as expected, and bytes cannot be accessed correctly by index
-                // because of that.
-                // See the difference in size between `roiBitmap.ByteCount` and `roiBitmap.PeekPixels().BytesSize`.
-                // We cannot access bytes correctly via `roiBitmap.PeekPixels()` either because the byte order seems
-                // to be different.
-                //
-                // The only correct way to access byte values seems to be through `roiBitmap.Pixels`, which might
-                // be slower.
-
                 double sum = 0;
                 int count = 0;
 
@@ -381,8 +372,13 @@ namespace RapidOcrNet
                     //#endif
 
                     ReadOnlySpan<byte> maskSpan = mask.GetPixelSpan();
-                    
-                    System.Diagnostics.Debug.Assert(maskSpan.Length.Equals(roiBitmap.Pixels.Length));
+                    ReadOnlySpan<byte> roiSpan = roiBitmap.GetPixelSpan();
+                    int roiRowBytes = roiBitmap.RowBytes;
+
+                    // maskSpan is roiWidth*roiHeight (packed), but roiSpan uses the source stride (roiRowBytes,
+                    // because of ExtractSubset()), so we must convert the flat mask index to (row, col) to get
+                    // the correct roiSpan offset.
+                    System.Diagnostics.Debug.Assert(maskSpan.Length == roiWidth * roiHeight);
 
                     for (int i = 0; i < maskSpan.Length; i++)
                     {
@@ -391,7 +387,9 @@ namespace RapidOcrNet
                             continue;
                         }
 
-                        sum += roiBitmap.Pixels[i].Red; // Access via Pixels to get correct byte value
+                        int row = i / roiWidth;
+                        int col = i % roiWidth;
+                        sum += roiSpan[row * roiRowBytes + col];
                         count++;
                     }
                 }
