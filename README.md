@@ -60,12 +60,7 @@ string targetImg = "image.png";
 
 using (var ocrEngin = new RapidOcr())
 {   
-	using var sessionOptions = new SessionOptions
-	{
-		GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
-		InterOpNumThreads = 0,
-		IntraOpNumThreads = 0
-	};
+	using var sessionOptions = GetDefaultSessionOptions();
 	
 	try { sessionOptions.AppendExecutionProvider_CUDA(); } // Add CUDA provider for GPU acceleration (NVIDIA GPUs)
 	catch { sessionOptions.AppendExecutionProvider_CPU(); } // Fallback to CPU if CUDA provider is not available

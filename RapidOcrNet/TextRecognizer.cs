@@ -40,14 +40,8 @@ namespace RapidOcrNet
 
         public void InitModel(string path, string keysPath, int numThread)
         {
-            using var op = new SessionOptions
-            {
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
-                InterOpNumThreads = numThread,
-                IntraOpNumThreads = numThread
-            };
-
-            InitModel(path, keysPath, op);
+            using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+            InitModel(path, keysPath, sessionOptions);
         }
 
         private static string[] InitKeys(string path)

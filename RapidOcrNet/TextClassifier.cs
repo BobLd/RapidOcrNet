@@ -33,14 +33,8 @@ namespace RapidOcrNet
 
         public void InitModel(string path, int numThread)
         {
-            using var op = new SessionOptions
-            {
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
-                InterOpNumThreads = numThread,
-                IntraOpNumThreads = numThread
-            };
-
-            InitModel(path, op);
+            using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+            InitModel(path, sessionOptions);
         }
 
         public Angle[] GetAngles(SKBitmap[] partImgs, bool doAngle, bool mostAngle)

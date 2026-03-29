@@ -44,14 +44,8 @@ namespace RapidOcrNet
 
         public void InitModel(string path, int numThread)
         {
-            using var op = new SessionOptions
-            {
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
-                InterOpNumThreads = numThread,
-                IntraOpNumThreads = numThread
-            };
-
-            InitModel(path, op);
+            using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+            InitModel(path, sessionOptions);
         }
 
         public IReadOnlyList<TextBox>? GetTextBoxes(SKBitmap src, ScaleParam scale, float boxScoreThresh, float boxThresh,

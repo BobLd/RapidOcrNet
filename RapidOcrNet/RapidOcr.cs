@@ -10,6 +10,13 @@ namespace RapidOcrNet
 {
     public sealed class RapidOcr : IDisposable
     {
+        public const string ModelsFolderName = "models";
+        public const string ModelsVersion = "v5";
+        public const string DefaultDetModelPath = "ch_PP-OCRv5_mobile_det.onnx";
+        public const string DefaultClsModelPath = "ch_ppocr_mobile_v2.0_cls_infer.onnx";
+        public const string DefaultRecModelPath = "latin_PP-OCRv5_rec_mobile_infer.onnx";
+        public const string DefaultKeysFilePath = "ppocrv5_latin_dict.txt";
+
         private readonly TextDetector _textDetector = new TextDetector();
         private readonly TextClassifier _textClassifier = new TextClassifier();
         private readonly TextRecognizer _textRecognizer = new TextRecognizer();
@@ -19,15 +26,8 @@ namespace RapidOcrNet
         /// </summary>
         public void InitModels(int numThread = 0)
         {
-            const string modelsFolderName = "models";
-            const string modelsVersion = "v5";
-
-            string detPath = Path.Combine(modelsFolderName, modelsVersion, "ch_PP-OCRv5_mobile_det.onnx");
-            string clsPath = Path.Combine(modelsFolderName, modelsVersion, "ch_ppocr_mobile_v2.0_cls_infer.onnx");
-            string recPath = Path.Combine(modelsFolderName, modelsVersion, "latin_PP-OCRv5_rec_mobile_infer.onnx");
-            string keysPath = Path.Combine(modelsFolderName, modelsVersion, "ppocrv5_latin_dict.txt");
-
-            InitModels(detPath, clsPath, recPath, keysPath, numThread);
+            using var sessionOptions = GetDefaultSessionOptions(numThread);
+            InitModels(sessionOptions);
         }
 
         /// <summary>
@@ -35,13 +35,10 @@ namespace RapidOcrNet
         /// </summary>
         public void InitModels(SessionOptions op)
         {
-            const string modelsFolderName = "models";
-            const string modelsVersion = "v5";
-
-            string detPath = Path.Combine(modelsFolderName, modelsVersion, "ch_PP-OCRv5_mobile_det.onnx");
-            string clsPath = Path.Combine(modelsFolderName, modelsVersion, "ch_ppocr_mobile_v2.0_cls_infer.onnx");
-            string recPath = Path.Combine(modelsFolderName, modelsVersion, "latin_PP-OCRv5_rec_mobile_infer.onnx");
-            string keysPath = Path.Combine(modelsFolderName, modelsVersion, "ppocrv5_latin_dict.txt");
+            string detPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultDetModelPath);
+            string clsPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultClsModelPath);
+            string recPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultRecModelPath);
+            string keysPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultKeysFilePath);
 
             InitModels(detPath, clsPath, recPath, keysPath, op);
         }
@@ -51,9 +48,8 @@ namespace RapidOcrNet
         /// </summary>
         public void InitModels(string detPath, string clsPath, string recPath, string keysPath, int numThread = 0)
         {
-            _textDetector.InitModel(detPath, numThread);
-            _textClassifier.InitModel(clsPath, numThread);
-            _textRecognizer.InitModel(recPath, keysPath, numThread);
+            using var sessionOptions = GetDefaultSessionOptions(numThread);
+            InitModels(detPath, clsPath, recPath, keysPath, sessionOptions);
         }
 
         /// <summary>
@@ -187,6 +183,26 @@ namespace RapidOcrNet
             _textClassifier.Dispose();
             _textRecognizer.Dispose();
             _textDetector.Dispose();
+        }
+
+        /// <summary>
+        /// Creates a new instance of SessionOptions configured with extended graph optimization and the specified
+        /// number of threads.
+        /// </summary>
+        /// <remarks>The returned SessionOptions object has GraphOptimizationLevel set to
+        /// ORT_ENABLE_EXTENDED. Both InterOpNumThreads and IntraOpNumThreads are set to the value of
+        /// numThread.</remarks>
+        /// <param name="numThread">The number of threads to use for both inter- and intra-operation parallelism. If set to 0, the default
+        /// thread count is used.</param>
+        /// <returns>A SessionOptions instance with extended graph optimization enabled and thread counts set according to the
+        /// specified value.</returns>
+        public static SessionOptions GetDefaultSessionOptions(int numThread = 0)
+        {
+            var op = new SessionOptions();
+            op.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED;
+            op.InterOpNumThreads = numThread;
+            op.IntraOpNumThreads = numThread;
+            return op;
         }
     }
 }
