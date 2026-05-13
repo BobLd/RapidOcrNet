@@ -5,7 +5,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<IsAotCompatible>true</IsAotCompatible>
-		<Version>1.0.2</Version>
+		<Version>2.0.0</Version>
 	</PropertyGroup>
 
 	<PropertyGroup>
@@ -46,10 +46,6 @@
 		<None Update="models\v5\ppocrv5_latin_dict.txt">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Folder Include="models\NewFolder\" />
 	</ItemGroup>
 
 	<ItemGroup>
