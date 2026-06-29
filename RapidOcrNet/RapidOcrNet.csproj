@@ -27,8 +27,8 @@
 
 	<ItemGroup>
 		<PackageReference Include="Clipper2" Version="2.0.0" />
-		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.3" />
-		<PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.24.3" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.27.0" />
 		<PackageReference Include="SkiaSharp" Version="3.119.1" />
 		<PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
 	</ItemGroup>
@@ -48,6 +48,40 @@
 		</None>
 	</ItemGroup>
 
+	<!-- PP-OCRv6 models: copied to output for local builds/tests and for apps that place
+	     them next to their binaries. Deliberately NOT packed into the NuGet (they total
+	     ~176 MB); NuGet consumers opt into v6 by supplying their own files via a
+	     RapidOcrModelSet. -->
+	<ItemGroup>
+		<None Update="models\v6\PP-OCRv6_det_tiny.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\PP-OCRv6_det_small.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\PP-OCRv6_det_medium.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\PP-OCRv6_rec_tiny.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\PP-OCRv6_rec_small.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\PP-OCRv6_rec_medium.onnx">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\ppocrv6_tiny_dict.txt">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\ppocrv6_small_dict.txt">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="models\v6\ppocrv6_medium_dict.txt">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
 	<ItemGroup>
 		<None Include="..\README.md">
 			<Pack>True</Pack>
@@ -60,6 +94,10 @@
 		<Content Include="models\v5\*.*" Pack="true" PackagePath="models\v5">
 			<PackageCopyToOutput>true</PackageCopyToOutput>
 		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="models\NewFolder\" />
 	</ItemGroup>
 
 </Project>

@@ -25,6 +25,8 @@ You need 4 files for the pipeline to work. The defaults bundled with the NuGet p
 
 When using the NuGet package, these are copied to `models/v5/` next to your binary automatically. If you want a different language (Chinese, Japanese, Korean, etc.), download the matching `*_rec_mobile_infer.onnx` + `*_dict.txt` pair and pass their paths to `InitModels` (see [Using custom models / other languages](#using-custom-models--other-languages)).
 
+> **PP-OCRv6 is also supported.** v6 ships a single multilingual recognizer in three sizes (tiny / small / medium) and reuses the v5 classifier. Because the v6 files are large (~176 MB for all three sizes), they are **not** bundled in the NuGet — you download them yourself and select them via a preset. See [Choosing models (PP-OCRv5 vs PP-OCRv6)](#choosing-models-pp-ocrv5-vs-pp-ocrv6).
+
 ## Quick start
 The shortest path to recognized text — load defaults, run, print:
 ```csharp
@@ -137,6 +139,62 @@ ocr.InitModels(sessionOptions);
 ```
 
 `GetDefaultSessionOptions(int numThread = 0)` also takes an optional thread count if you'd rather keep CPU execution but pin Inter/Intra-op parallelism.
+
+## Choosing models (PP-OCRv5 vs PP-OCRv6)
+`RapidOcrModelSet` bundles a complete set of models (detector + classifier + recognizer + dictionary) plus the detector's normalization, so you can switch model families with a single argument. Pass a preset to `InitModels`:
+
+```csharp
+using var ocr = new RapidOcr();
+
+ocr.InitModels(RapidOcrModelSet.PPOCRv5Latin);   // same as the parameterless InitModels()
+// or:
+ocr.InitModels(RapidOcrModelSet.PPOCRv6Small);   // PP-OCRv6, balanced size/accuracy
+```
+
+Available presets:
+
+| Preset | Models | Notes |
+|---|---|---|
+| `RapidOcrModelSet.PPOCRv5Latin` | bundled PP-OCRv5 latin set | The library default (`InitModels()` with no args uses this). |
+| `RapidOcrModelSet.PPOCRv6Tiny` | PP-OCRv6 tiny | Smallest / fastest, lower accuracy (~6 MB). |
+| `RapidOcrModelSet.PPOCRv6Small` | PP-OCRv6 small | Balanced; matches the Python `rapidocr` v6 default (~31 MB). |
+| `RapidOcrModelSet.PPOCRv6Medium` | PP-OCRv6 medium | Largest / most accurate, slowest (~138 MB). |
+| `RapidOcrModelSet.PPOCRv6` | alias for `PPOCRv6Small` | Convenience default for v6. |
+
+All v6 presets are **multilingual** (Latin + CJK and more) and reuse the v5 classifier model — PP-OCRv6 ships none of its own.
+
+### Getting the v6 model files
+The v6 files are not in the NuGet. Download them from the [RapidOCR default models list](https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml) and place them under `models/v6/` next to your binary, using these exact names (this is what the presets resolve to):
+
+| Size | Detector | Recognizer | Dictionary |
+|---|---|---|---|
+| tiny | `PP-OCRv6_det_tiny.onnx` | `PP-OCRv6_rec_tiny.onnx` | `ppocrv6_tiny_dict.txt` |
+| small | `PP-OCRv6_det_small.onnx` | `PP-OCRv6_rec_small.onnx` | `ppocrv6_small_dict.txt` |
+| medium | `PP-OCRv6_det_medium.onnx` | `PP-OCRv6_rec_medium.onnx` | `ppocrv6_medium_dict.txt` |
+
+(The v5 classifier `ch_ppocr_mobile_v2.0_cls_infer.onnx` stays in `models/v5/`, where the NuGet already puts it.) If you prefer different paths, build a `RapidOcrModelSet` yourself:
+
+```csharp
+var v6 = RapidOcrModelSet.PPOCRv6Small with
+{
+    DetModelPath = "/my/models/PP-OCRv6_det_small.onnx",
+    RecModelPath = "/my/models/PP-OCRv6_rec_small.onnx",
+    KeysPath     = "/my/models/ppocrv6_small_dict.txt",
+};
+ocr.InitModels(v6);
+```
+
+### Recommended options for v6
+Pair v6 with the **`RapidOcrOptions.PPOCRv6`** preset — it matches the detector preprocessing these models were exported for (short-side adaptive resize to 736, no border) and gives the best results:
+
+```csharp
+ocr.InitModels(RapidOcrModelSet.PPOCRv6Small);
+OcrResult result = ocr.Detect("image.png", RapidOcrOptions.PPOCRv6);
+```
+
+> ⚠️ **Do not use `RapidOcrOptions.Default` with v6.** `Default`'s 1024 long-side cap and 50&nbsp;px white border are tuned for the bundled v5 model; they starve the v6 detector of resolution and produce missed or garbled boxes on small images. `PPOCRv6` is a named alias of `PythonCompat` (the Python-`rapidocr`-faithful preprocessing). v6's strength is **multilingual** coverage (Latin + CJK and more in one model) — on Latin-only inputs it performs similarly to the Latin-specialised v5 model.
+
+`InitModels(RapidOcrModelSet, …)` also has an overload taking a custom `SessionOptions` for GPU / threading, exactly like the other `InitModels` overloads.
 
 ## Using custom models / other languages
 Pass explicit paths if you've downloaded different ONNX files (e.g. Chinese, Japanese, or a heavier `_server_` recognizer):

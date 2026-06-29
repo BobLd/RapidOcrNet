@@ -62,6 +62,30 @@ public sealed class RapidOcr : IDisposable
         _textRecognizer.InitModel(recPath, keysPath, op);
     }
 
+    /// <summary>
+    /// Initialize using a model set (e.g. <see cref="RapidOcrModelSet.PPOCRv5Latin"/> or
+    /// <see cref="RapidOcrModelSet.PPOCRv6Small"/>) and default options.
+    /// </summary>
+    public void InitModels(RapidOcrModelSet models, int numThread = 0)
+    {
+        using var sessionOptions = GetDefaultSessionOptions(numThread);
+        InitModels(models, sessionOptions);
+    }
+
+    /// <summary>
+    /// Initialize using a model set (e.g. <see cref="RapidOcrModelSet.PPOCRv5Latin"/> or
+    /// <see cref="RapidOcrModelSet.PPOCRv6Small"/>) and custom options. The model set carries
+    /// the detector's per-version normalization, so v6 detectors are wired up correctly.
+    /// </summary>
+    public void InitModels(RapidOcrModelSet models, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+
+        _textDetector.InitModel(models.DetModelPath, models.DetMean, models.DetStd, op);
+        _textClassifier.InitModel(models.ClsModelPath, op);
+        _textRecognizer.InitModel(models.RecModelPath, models.KeysPath, op);
+    }
+
     public OcrResult Detect(string path, RapidOcrOptions options)
     {
         if (!File.Exists(path))

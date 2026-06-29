@@ -368,3 +368,6 @@ FodyWeavers.xsd
 
 /.claude
 /docs
+/RapidOcrNet/models/v6/ppocrv6_medium_dict.txt
+/RapidOcrNet/models/v6/PP-OCRv6_rec_medium.onnx
+/RapidOcrNet/models/v6/PP-OCRv6_det_medium.onnx
