@@ -55,6 +55,19 @@ public sealed record RapidOcrOptions
     };
 
     /// <summary>
+    /// Recommended options for the PP-OCRv6 models (<see cref="RapidOcrModelSet.PPOCRv6Small"/> etc.).
+    /// </summary>
+    /// <remarks>
+    /// These are the <see cref="PythonCompat"/> settings: no white border and a short-side
+    /// adaptive resize to <see cref="LimitSideLen"/> (736), exactly matching the
+    /// <c>limit_type="min"</c> detector preprocessing the standard PP-OCRv6 ONNX models were
+    /// exported for. Do <b>not</b> use <see cref="Default"/> with v6 — its 1024 long-side cap
+    /// and 50&#160;px white border are tuned for the bundled v5 model and starve the v6
+    /// detector of resolution on small images (missed or garbled boxes).
+    /// </remarks>
+    public static readonly RapidOcrOptions PPOCRv6 = PythonCompat;
+
+    /// <summary>
     /// Optional extra all-sides padding applied to the source image before detection.
     /// Default 0 (Python doesn't do this). Set to e.g. 50 to restore legacy behavior for
     /// images with text running close to the edge.

@@ -19,9 +19,15 @@ public sealed class TextDetector : IDisposable
     // NOTE: the PP-OCRv5 detector ONNX bundled with this repo was empirically trained with
     // ImageNet normalization, NOT the (0.5,0.5,0.5)/(0.5,0.5,0.5) constants the Python
     // rapidocr config ships (its config.yaml targets PP-OCRv4). Reverting to PP-OCR's
-    // canonical 0.5/0.5 here causes the detector to miss most boxes.
-    private static readonly float[] MeanValues = [0.485F * 255F, 0.456F * 255F, 0.406F * 255F];
-    private static readonly float[] NormValues = [1.0F / 0.229F / 255.0F, 1.0F / 0.224F / 255.0F, 1.0F / 0.225F / 255.0F];
+    // canonical 0.5/0.5 here causes the detector to miss most boxes. This stays the default
+    // so callers using the parameterless-norm InitModel overload keep v5 behavior. PP-OCRv6
+    // models use 0.5/0.5 instead, passed in explicitly via the mean/std InitModel overload.
+    private static readonly float[] DefaultMeanValues = [0.485F * 255F, 0.456F * 255F, 0.406F * 255F];
+    private static readonly float[] DefaultNormValues = [1.0F / 0.229F / 255.0F, 1.0F / 0.224F / 255.0F, 1.0F / 0.225F / 255.0F];
+
+    // Per-instance normalization, set at InitModel time. Defaults to ImageNet (v5).
+    private float[] _meanValues = DefaultMeanValues;
+    private float[] _normValues = DefaultNormValues;
 
     private InferenceSession _dbNet;
     private string _inputName;
@@ -46,6 +52,38 @@ public sealed class TextDetector : IDisposable
         _inputName = _dbNet.InputMetadata.Keys.First();
     }
 
+    /// <summary>
+    /// Initialize the detector with explicit pixel-space normalization. <paramref name="mean"/>
+    /// and <paramref name="std"/> are in pixel space (e.g. 0.5 maps to 127.5). The std is
+    /// inverted internally so the existing <c>(pixel - mean) * (1/std)</c> normalization math
+    /// is preserved. Use this for PP-OCRv6 detectors, which expect mean/std (127.5, 127.5).
+    /// </summary>
+    public void InitModel(string path, float[] mean, float[] std, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(mean);
+        ArgumentNullException.ThrowIfNull(std);
+        if (mean.Length != 3 || std.Length != 3)
+        {
+            throw new ArgumentException("Detector mean and std must each have exactly 3 channel values.");
+        }
+
+        InitModel(path, op);
+
+        _meanValues = mean;
+        var norm = new float[3];
+        for (int c = 0; c < 3; c++)
+        {
+            if (std[c] == 0F)
+            {
+                throw new ArgumentException("Detector std values must be non-zero.", nameof(std));
+            }
+
+            norm[c] = 1.0F / std[c];
+        }
+
+        _normValues = norm;
+    }
+
     public void InitModel(string path, int numThread)
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
@@ -67,7 +105,7 @@ public sealed class TextDetector : IDisposable
 #endif
             */
 
-            inputTensors = OcrUtils.SubtractMeanNormalize(srcResize, MeanValues, NormValues);
+            inputTensors = OcrUtils.SubtractMeanNormalize(srcResize, _meanValues, _normValues);
         }
 
         IReadOnlyCollection<NamedOnnxValue> inputs = new NamedOnnxValue[]
