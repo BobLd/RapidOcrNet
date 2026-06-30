@@ -83,7 +83,7 @@ public sealed record RapidOcrModelSet
         DetModelPath = V6("PP-OCRv6_det_small.onnx"),
         ClsModelPath = V5(V5ClsModel),
         RecModelPath = V6("PP-OCRv6_rec_small.onnx"),
-        KeysPath = V6("ppocrv6_small_dict.txt"),
+        KeysPath = V6("ppocrv6_dict.txt"),
         DetMean = HalfMean,
         DetStd = HalfStd
     };
@@ -94,11 +94,8 @@ public sealed record RapidOcrModelSet
         DetModelPath = V6("PP-OCRv6_det_medium.onnx"),
         ClsModelPath = V5(V5ClsModel),
         RecModelPath = V6("PP-OCRv6_rec_medium.onnx"),
-        KeysPath = V6("ppocrv6_medium_dict.txt"),
+        KeysPath = V6("ppocrv6_dict.txt"),
         DetMean = HalfMean,
         DetStd = HalfStd
     };
-
-    /// <summary>Convenience alias for the default PP-OCRv6 size (<see cref="PPOCRv6Small"/>).</summary>
-    public static RapidOcrModelSet PPOCRv6 => PPOCRv6Small;
 }
