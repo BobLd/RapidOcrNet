@@ -116,10 +116,11 @@ public sealed record RapidOcrOptions
 
     /// <summary>
     /// When true, the classifier preprocesses crops the way Python rapidocr does:
-    /// resize preserving aspect ratio to (resized_w, AngleDstHeight) and pad the
+    /// resize preserving aspect ratio to (resized_w, cls input height) and pad the
     /// remainder with midgray (equivalent to Python's "zero-pad after normalization").
-    /// When false (default), the legacy stretched-to-192×48 path is used, which the
-    /// bundled PP-OCRv5 cls ONNX in this repo is tuned for.
+    /// The cls input geometry is read from the loaded model (PP-OCRv5
+    /// ch_PP-LCNet_x0_25_textline_ori is 80×160; legacy dynamic cls models fall back
+    /// to 48×192). When false (default), a non-uniform stretch to that geometry is used.
     /// </summary>
     public bool ClsPreserveAspectRatio { get; init; }
 

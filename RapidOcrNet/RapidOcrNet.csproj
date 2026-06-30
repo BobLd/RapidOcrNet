@@ -37,7 +37,7 @@
 		<None Update="models\v5\ch_PP-OCRv5_mobile_det.onnx">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Update="models\v5\ch_ppocr_mobile_v2.0_cls_infer.onnx">
+		<None Update="models\v5\ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
 		<None Update="models\v5\latin_PP-OCRv5_rec_mobile_infer.onnx">

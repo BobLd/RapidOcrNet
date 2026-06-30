@@ -19,7 +19,7 @@ All ONNX models can be downloaded from: https://github.com/RapidAI/RapidOCR/blob
 
 You need 4 files for the pipeline to work. The defaults bundled with the NuGet package are the PP-OCRv5 **latin** set:
 - Detection: `ch_PP-OCRv5_mobile_det.onnx`
-- Classification: `ch_ppocr_mobile_v2.0_cls_infer.onnx`
+- Classification: `ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx`
 - Recognition: `latin_PP-OCRv5_rec_mobile_infer.onnx`
 - Model dictionary: `ppocrv5_latin_dict.txt`
 
@@ -172,7 +172,7 @@ The v6 files are not in the NuGet. Download them from the [RapidOCR default mode
 | small | `PP-OCRv6_det_small.onnx` | `PP-OCRv6_rec_small.onnx` | `ppocrv6_small_dict.txt` |
 | medium | `PP-OCRv6_det_medium.onnx` | `PP-OCRv6_rec_medium.onnx` | `ppocrv6_medium_dict.txt` |
 
-(The v5 classifier `ch_ppocr_mobile_v2.0_cls_infer.onnx` stays in `models/v5/`, where the NuGet already puts it.) If you prefer different paths, build a `RapidOcrModelSet` yourself:
+(The v5 classifier `ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx` stays in `models/v5/`, where the NuGet already puts it.) If you prefer different paths, build a `RapidOcrModelSet` yourself:
 
 ```csharp
 var v6 = RapidOcrModelSet.PPOCRv6Small with
@@ -203,7 +203,7 @@ using var ocr = new RapidOcr();
 
 ocr.InitModels(
     detPath:  "models/v5/ch_PP-OCRv5_det_server.onnx",
-    clsPath:  "models/v5/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    clsPath:  "models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx",
     recPath:  "models/v5/korean_PP-OCRv5_rec_mobile.onnx",
     keysPath: "models/v5/ppocrv5_korean_dict.txt");
 

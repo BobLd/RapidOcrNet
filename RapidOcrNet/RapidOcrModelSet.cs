@@ -53,7 +53,7 @@ public sealed record RapidOcrModelSet
     private static string V5(string fileName) => Path.Combine(RapidOcr.ModelsFolderName, "v5", fileName);
     private static string V6(string fileName) => Path.Combine(RapidOcr.ModelsFolderName, "v6", fileName);
 
-    private const string V5ClsModel = "ch_ppocr_mobile_v2.0_cls_infer.onnx";
+    private const string V5ClsModel = "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx";
 
     /// <summary>The bundled PP-OCRv5 latin models (the library default).</summary>
     public static RapidOcrModelSet PPOCRv5Latin { get; } = new()
