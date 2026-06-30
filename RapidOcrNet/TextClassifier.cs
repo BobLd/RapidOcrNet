@@ -10,12 +10,20 @@ namespace RapidOcrNet;
 
 public sealed class TextClassifier : IDisposable
 {
-    private const int AngleDstWidth = 192;
-    private const int AngleDstHeight = 48;
+    // Legacy fallback geometry, used when the model declares dynamic H/W (the
+    // PP-OCRv4 ch_ppocr_mobile_v2.0 cls exports input [-1,3,-1,-1]).
+    private const int DefaultAngleDstWidth = 192;
+    private const int DefaultAngleDstHeight = 48;
     private const int AngleCols = 2;
 
     private static readonly float[] MeanValues = [127.5F, 127.5F, 127.5F];
     private static readonly float[] NormValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
+
+    // Resolved from the loaded model's input metadata in InitModel. The PP-OCRv5
+    // ch_PP-LCNet_x0_25_textline_ori cls exports a fixed input [-1,3,80,160], so we
+    // must feed 80x160; older dynamic-shape cls models keep the 48x192 default.
+    private int _angleDstWidth = DefaultAngleDstWidth;
+    private int _angleDstHeight = DefaultAngleDstHeight;
 
     private InferenceSession _angleNet;
     private string _inputName;
@@ -29,6 +37,22 @@ public sealed class TextClassifier : IDisposable
 
         _angleNet = new InferenceSession(path, op);
         _inputName = _angleNet.InputMetadata.Keys.First();
+
+        // NCHW input: dims[2] is height, dims[3] is width. A dimension of -1 means
+        // dynamic, in which case we keep the legacy 48x192 default.
+        int[] dims = _angleNet.InputMetadata[_inputName].Dimensions;
+        if (dims is { Length: 4 })
+        {
+            if (dims[2] > 0)
+            {
+                _angleDstHeight = dims[2];
+            }
+
+            if (dims[3] > 0)
+            {
+                _angleDstWidth = dims[3];
+            }
+        }
     }
 
     public void InitModel(string path, int numThread)
@@ -90,19 +114,19 @@ public sealed class TextClassifier : IDisposable
         if (preserveAspectRatio)
         {
             // PP-OCR cls preprocessing (Python ch_ppocr_cls/main.py:83-106):
-            //   1. resize preserving aspect to (resized_w, AngleDstHeight) where
-            //      resized_w = min(AngleDstWidth, ceil(AngleDstHeight * w/h))
+            //   1. resize preserving aspect to (resized_w, _angleDstHeight) where
+            //      resized_w = min(_angleDstWidth, ceil(_angleDstHeight * w/h))
             //   2. zero-pad in normalized space (right side stays 0 in the [-1,1] tensor)
             //
             // In raw pixel space, "normalized 0" corresponds to midgray (127.5). So we
             // clear the canvas to midgray BEFORE drawing the resized strip, then run
             // the standard (pixel - 127.5) / 127.5 normalization on the whole image.
             float ratio = src.Width / (float)src.Height;
-            int resizedW = Math.Min(AngleDstWidth, (int)Math.Ceiling(AngleDstHeight * ratio));
+            int resizedW = Math.Min(_angleDstWidth, (int)Math.Ceiling(_angleDstHeight * ratio));
             resizedW = Math.Max(resizedW, 1);
 
-            var angleInfo = new SKImageInfo(AngleDstWidth, AngleDstHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
-            using (var resized = src.Resize(new SKSizeI(resizedW, AngleDstHeight), OcrUtils.NetworkSampling))
+            var angleInfo = new SKImageInfo(_angleDstWidth, _angleDstHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
+            using (var resized = src.Resize(new SKSizeI(resizedW, _angleDstHeight), OcrUtils.NetworkSampling))
             using (var angleImg = new SKBitmap(angleInfo))
             {
                 using (var canvas = new SKCanvas(angleImg))
@@ -115,9 +139,9 @@ public sealed class TextClassifier : IDisposable
         }
         else
         {
-            // Legacy: non-uniform stretch to (AngleDstWidth, AngleDstHeight) with
-            // Mitchell cubic. The bundled PP-OCRv5 cls ONNX is tuned for this.
-            using (var angleImg = src.Resize(new SKSizeI(AngleDstWidth, AngleDstHeight), new SKSamplingOptions(SKCubicResampler.Mitchell)))
+            // Legacy: non-uniform stretch to (_angleDstWidth, _angleDstHeight) with
+            // Mitchell cubic.
+            using (var angleImg = src.Resize(new SKSizeI(_angleDstWidth, _angleDstHeight), new SKSamplingOptions(SKCubicResampler.Mitchell)))
             {
                 inputTensors = OcrUtils.SubtractMeanNormalize(angleImg, MeanValues, NormValues);
             }
