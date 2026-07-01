@@ -98,8 +98,64 @@ public sealed class RapidOcr : IDisposable
             return Detect(originSrc, options);
         }
     }
-
+    
     public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options)
+    {
+        using var input = PrepareDetectorInput(originSrc, options);
+        return DetectOnce(input,
+            options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio,
+            options.DoAngle, options.MostAngle,
+            options.ReturnWordBox, options.ReturnSingleCharBox,
+            options.TextScore, options.ClsThresh,
+            options.ClsPreserveAspectRatio);
+    }
+
+    /// <summary>
+    /// Runs the detection stage only and returns the raw text boxes, skipping angle
+    /// classification and recognition. Mirrors Python rapidocr's
+    /// <c>ocr(image, use_det=True, use_cls=False, use_rec=False)</c> call. Useful when
+    /// you need layout boxes before deciding how to crop and OCR the image (e.g. split
+    /// a scan into columns or per-region passes).
+    /// </summary>
+    /// <param name="path">Path to the source image.</param>
+    /// <param name="options">Detection options. Recognition-only fields (TextScore,
+    /// ReturnWordBox, ClsThresh, etc.) are ignored on this path.</param>
+    /// <returns>Boxes in source-image coordinates, sorted in reading order.</returns>
+    public IReadOnlyList<TextBox> DetectBoxes(string path, RapidOcrOptions options)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"Could not find image to process: '{path}'.", path);
+        }
+
+        using (var originSrc = SKBitmap.Decode(path))
+        {
+            return DetectBoxes(originSrc, options);
+        }
+    }
+
+    /// <summary>
+    /// Runs the detection stage only and returns the raw text boxes, skipping angle
+    /// classification and recognition. See <see cref="DetectBoxes(string, RapidOcrOptions)"/>.
+    /// </summary>
+    public IReadOnlyList<TextBox> DetectBoxes(SKBitmap originSrc, RapidOcrOptions options)
+    {
+        using var input = PrepareDetectorInput(originSrc, options);
+        var textBoxes = _textDetector.GetTextBoxes(input.Bitmap, input.Scale,
+            options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio) ?? [];
+
+        // Map from letterboxed-image space back into the original image's space, the
+        // same transform Detect applies to TextBlock.BoxPoints. Boxes own fresh
+        // point arrays, so in-place mutation is safe.
+        foreach (var box in textBoxes)
+        {
+            input.MapToOriginal(box.BoxPoints);
+        }
+
+        return textBoxes;
+    }
+
+    private static DetectorInput PrepareDetectorInput(SKBitmap originSrc, RapidOcrOptions options)
     {
         int outerPadding = Math.Max(0, options.Padding);
         SKBitmap outerPadded = originSrc;
@@ -127,9 +183,9 @@ public sealed class RapidOcr : IDisposable
         SKBitmap letterboxed = OcrUtils.ApplyVerticalLetterbox(bounded, options.WidthHeightRatio, options.MinHeight, out int letterboxTop);
         SKBitmap? ownedLetterbox = !ReferenceEquals(letterboxed, bounded) ? letterboxed : null;
 
+        ScaleParam scale;
         try
         {
-            ScaleParam scale;
             if (options.ImgResize > 0)
             {
                 // Legacy path: explicit max-side cap. Caps at source size for tiny
@@ -145,43 +201,92 @@ public sealed class RapidOcr : IDisposable
                 // matching rapidocr-python's Det.limit_type="min" config.
                 scale = ScaleParam.GetAdaptiveScaleParam(letterboxed, options.LimitSideLen);
             }
-
-            // Bound ratio = pre-resize size / bounded size, per axis (the two sides are
-            // rounded to /32 independently, so they can differ). This is Python rapidocr's
-            // ratio_w / ratio_h from resize_image_within_bounds, used to map detector-space
-            // coordinates back up into the original image. When ResizeImageWithinBounds was a
-            // no-op (typical inputs, or the legacy ImgResize path), bounded == outerPadded so
-            // both ratios are exactly 1.
-            float boundRatioW = outerPadded.Width / (float)bounded.Width;
-            float boundRatioH = outerPadded.Height / (float)bounded.Height;
-
-            return DetectOnce(letterboxed, outerPadding, letterboxTop, boundRatioW, boundRatioH,
-                originSrc.Width, originSrc.Height, scale,
-                options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio,
-                options.DoAngle, options.MostAngle,
-                options.ReturnWordBox, options.ReturnSingleCharBox,
-                options.TextScore, options.ClsThresh,
-                options.ClsPreserveAspectRatio);
         }
-        finally
+        catch
         {
             ownedLetterbox?.Dispose();
             ownedBounded?.Dispose();
             ownedOuter?.Dispose();
+            throw;
+        }
+
+        // Bound ratio = pre-resize size / bounded size, per axis (the two sides are
+        // rounded to /32 independently, so they can differ). This is Python rapidocr's
+        // ratio_w / ratio_h from resize_image_within_bounds, used to map detector-space
+        // coordinates back up into the original image. When ResizeImageWithinBounds was a
+        // no-op (typical inputs, or the legacy ImgResize path), bounded == outerPadded so
+        // both ratios are exactly 1.
+        float boundRatioW = outerPadded.Width / (float)bounded.Width;
+        float boundRatioH = outerPadded.Height / (float)bounded.Height;
+
+        return new DetectorInput(letterboxed, scale, outerPadding, letterboxTop,
+            boundRatioW, boundRatioH, originSrc.Width, originSrc.Height,
+            ownedOuter, ownedBounded, ownedLetterbox);
+    }
+
+    private readonly struct DetectorInput : IDisposable
+    {
+        public readonly SKBitmap Bitmap;
+        public readonly ScaleParam Scale;
+        private readonly int _outerPadding;
+        private readonly int _letterboxTop;
+        private readonly float _boundRatioW;
+        private readonly float _boundRatioH;
+        private readonly int _originWidth;
+        private readonly int _originHeight;
+        private readonly SKBitmap? _ownedOuter;
+        private readonly SKBitmap? _ownedBounded;
+        private readonly SKBitmap? _ownedLetterbox;
+
+        public DetectorInput(SKBitmap bitmap, ScaleParam scale, int outerPadding, int letterboxTop,
+            float boundRatioW, float boundRatioH, int originWidth, int originHeight,
+            SKBitmap? ownedOuter, SKBitmap? ownedBounded, SKBitmap? ownedLetterbox)
+        {
+            Bitmap = bitmap;
+            Scale = scale;
+            _outerPadding = outerPadding;
+            _letterboxTop = letterboxTop;
+            _boundRatioW = boundRatioW;
+            _boundRatioH = boundRatioH;
+            _originWidth = originWidth;
+            _originHeight = originHeight;
+            _ownedOuter = ownedOuter;
+            _ownedBounded = ownedBounded;
+            _ownedLetterbox = ownedLetterbox;
+        }
+
+        // Map detector (letterboxed) coordinates back into the original image space,
+        // undoing the vertical letterbox, bound-ratio rescale and outer padding. Mirrors
+        // Python rapidocr's map_boxes_to_original. Points are mutated in place.
+        public void MapToOriginal(SKPointI[] points)
+        {
+            for (int p = 0; p < points.Length; p++)
+            {
+                MapPointToOriginal(ref points[p], _outerPadding, _letterboxTop,
+                    _boundRatioW, _boundRatioH, _originWidth, _originHeight);
+            }
+        }
+
+        public void Dispose()
+        {
+            _ownedLetterbox?.Dispose();
+            _ownedBounded?.Dispose();
+            _ownedOuter?.Dispose();
         }
     }
 
-    private OcrResult DetectOnce(SKBitmap src, int outerPadding, int letterboxTop, float boundRatioW,
-        float boundRatioH, int originWidth, int originHeight, ScaleParam scale, float boxScoreThresh,
+    private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio, bool doAngle, bool mostAngle,
         bool returnWordBox, bool returnSingleCharBox, float textScore, float clsThresh,
         bool clsPreserveAspectRatio)
     {
+        SKBitmap src = input.Bitmap;
+
         // Start detect
         var sw = ValueStopwatch.StartNew();
 
         // step: dbNet getTextBoxes
-        var textBoxes = _textDetector.GetTextBoxes(src, scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
+        var textBoxes = _textDetector.GetTextBoxes(src, input.Scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
         var dbNetTime = sw.ElapsedMilliseconds;
 
         // getPartImages: capture crop bookkeeping when word boxes are requested.
@@ -248,21 +353,12 @@ public sealed class RapidOcr : IDisposable
                     // Map word polygons back to original space, same as BoxPoints below.
                     for (int w = 0; w < wordResults.Length; w++)
                     {
-                        var pts = wordResults[w].BoxPoints;
-                        for (int p = 0; p < pts.Length; p++)
-                        {
-                            MapPointToOriginal(ref pts[p], outerPadding, letterboxTop, boundRatioW, boundRatioH,
-                                originWidth, originHeight);
-                        }
+                        input.MapToOriginal(wordResults[w].BoxPoints);
                     }
                 }
             }
 
-            for (int p = 0; p < textBox.BoxPoints.Length; ++p)
-            {
-                MapPointToOriginal(ref textBox.BoxPoints[p], outerPadding, letterboxTop, boundRatioW, boundRatioH,
-                    originWidth, originHeight);
-            }
+            input.MapToOriginal(textBox.BoxPoints);
 
             textBlocks[i] = new TextBlock
             {
