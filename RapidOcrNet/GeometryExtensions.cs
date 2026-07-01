@@ -270,8 +270,21 @@ namespace RapidOcrNet
             ];
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="points"></param>
+        /// <param name="width"><see cref="float.NaN"/> if not valid.</param>
+        /// <param name="height"><see cref="float.NaN"/> if not valid.</param>
         public static void GetSize(SKPoint[] points, out float width, out float height)
         {
+            if (points.Length < 4)
+            {
+                width = float.NaN;
+                height = float.NaN;
+                return;
+            }
+            
             SKPoint topLeft = points[0];
             SKPoint bottomLeft = points[2];
             SKPoint bottomRight = points[3];
