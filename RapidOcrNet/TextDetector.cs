@@ -220,7 +220,7 @@ public sealed class TextDetector : IDisposable
             }
 
             SKPoint[] minBox = GetMiniBox(contour, out float maxSide);
-            if (maxSide < maxSideThresh)
+            if (float.IsNaN(maxSide) || maxSide < maxSideThresh)
             {
                 continue;
             }
@@ -243,7 +243,7 @@ public sealed class TextDetector : IDisposable
             }
 
             ReadOnlySpan<SKPoint> clipMinBox = GetMiniBox(clipBox, out maxSide);
-            if (maxSide < maxSideThresh + 2)
+            if (float.IsNaN(maxSide) || maxSide < maxSideThresh + 2)
             {
                 continue;
             }
@@ -310,9 +310,20 @@ public sealed class TextDetector : IDisposable
             .ToList();
     }
 
+    /// <summary>
+    /// Gets the mini box.
+    /// </summary>
+    /// <param name="contours"></param>
+    /// <param name="minEdgeSize"><see cref="float.NaN"/> if not valid.</param>
     private static SKPoint[] GetMiniBox(SKPoint[] contours, out float minEdgeSize)
     {
         SKPoint[] points = GeometryExtensions.MinimumAreaRectangle(contours);
+
+        if (points.Length < 4)
+        {
+            minEdgeSize = float.NaN;
+            return [];
+        }
 
         GeometryExtensions.GetSize(points, out float width, out float height);
         minEdgeSize = MathF.Min(width, height);
@@ -496,6 +507,11 @@ public sealed class TextDetector : IDisposable
         SKPoint[] points = GeometryExtensions.MinimumAreaRectangle(box);
         GeometryExtensions.GetSize(points, out float width, out float height);
 
+        if (float.IsNaN(width) || float.IsNaN(height))
+        {
+            return null;
+        }
+        
         if (height < 1.001 && width < 1.001)
         {
             return null;
