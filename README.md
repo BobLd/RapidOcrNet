@@ -3,7 +3,8 @@ Cross-platform OCR processing library using PaddleOCR ONNX models, and based on 
 
 Available as NuGet package: https://www.nuget.org/packages/RapidOcrNet/
 
-The code was optimised to remove dependencies on `System.Drawing` and `OpenCV`. Image processing is now done only using `SkiaSharp` and `PContourNet`. The library targets **net8.0** and **net10.0**, is **AOT-compatible**, and ships the **PP-OCRv5** models out of the box (v4 and v3 are also supported — see [#3](https://github.com/BobLd/RapidOcrNet/issues/3)).
+The code was optimised to remove dependencies on `System.Drawing` and `OpenCV`. Image processing is now done only using `SkiaSharp` and `PContourNet`. The library targets **net8.0** and **net10.0**, is **AOT-compatible**, and ships the **PP-OCRv5** models out of the box.
+v4 and v3 are also supported — see [#3](https://github.com/BobLd/RapidOcrNet/issues/3). v6 models are also supported, see [Choosing models (PP-OCRv5 vs PP-OCRv6)](#choosing-models-pp-ocrv5-vs-pp-ocrv6)
 
 ## How the pipeline works
 A single `Detect()` call runs three ONNX models in sequence:
