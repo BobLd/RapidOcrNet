@@ -69,7 +69,12 @@ public sealed class TextRecognizer : IDisposable
     /// current line instead of after the whole page. On a heavy model set that is the difference
     /// between about a second and about a minute.
     /// </param>
-    public TextLine[] GetTextLines(SKBitmap[] partImgs, CancellationToken cancellationToken = default)
+    /// <param name="progress">
+    /// Reported after each crop as (recognised, total). Recognition is the long pole of a page and
+    /// its cost is per line, so this is the only stage where a caller can show real movement.
+    /// </param>
+    public TextLine[] GetTextLines(SKBitmap[] partImgs, CancellationToken cancellationToken = default,
+        IProgress<(int Completed, int Total)>? progress = null)
     {
         // NOTE: Python's pipeline batches crops by aspect ratio and zero-right-pads
         // each crop to 48 * max(w/h, 320/48) so the recognizer sees its training
@@ -83,6 +88,7 @@ public sealed class TextRecognizer : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             textLines[i] = GetTextLine(partImgs[i]);
+            progress?.Report((i + 1, partImgs.Length));
         }
         return textLines;
     }

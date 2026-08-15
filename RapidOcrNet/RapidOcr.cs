@@ -88,7 +88,8 @@ public sealed class RapidOcr : IDisposable
 
     /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, CancellationToken)"/>
     public OcrResult Detect(string path, RapidOcrOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<(int Completed, int Total)>? progress = null)
     {
         if (!File.Exists(path))
         {
@@ -97,7 +98,7 @@ public sealed class RapidOcr : IDisposable
 
         using (var originSrc = SKBitmap.Decode(path))
         {
-            return Detect(originSrc, options, cancellationToken);
+            return Detect(originSrc, options, cancellationToken, progress);
         }
     }
 
@@ -111,8 +112,13 @@ public sealed class RapidOcr : IDisposable
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was cancelled before the next stage or crop.
     /// </exception>
+    /// <param name="progress">
+    /// Reported during recognition as (lines recognised, lines detected). Nothing is reported
+    /// before detection finishes, because the line count is not known until then.
+    /// </param>
     public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<(int Completed, int Total)>? progress = null)
     {
         using var input = PrepareDetectorInput(originSrc, options);
         return DetectOnce(input,
@@ -121,7 +127,7 @@ public sealed class RapidOcr : IDisposable
             options.ReturnWordBox, options.ReturnSingleCharBox,
             options.TextScore, options.ClsThresh,
             options.ClsPreserveAspectRatio,
-            cancellationToken);
+            cancellationToken, progress);
     }
 
     /// <summary>
@@ -296,7 +302,8 @@ public sealed class RapidOcr : IDisposable
     private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio, bool doAngle, bool mostAngle,
         bool returnWordBox, bool returnSingleCharBox, float textScore, float clsThresh,
-        bool clsPreserveAspectRatio, CancellationToken cancellationToken = default)
+        bool clsPreserveAspectRatio, CancellationToken cancellationToken = default,
+        IProgress<(int Completed, int Total)>? progress = null)
     {
         SKBitmap src = input.Bitmap;
 
@@ -354,7 +361,7 @@ public sealed class RapidOcr : IDisposable
             }
 
             // step: crnnNet getTextLines
-            textLines = _textRecognizer.GetTextLines(partImages, cancellationToken);
+            textLines = _textRecognizer.GetTextLines(partImages, cancellationToken, progress);
         }
         finally
         {

@@ -108,6 +108,39 @@ public class CancellationTest
         Assert.Single(angles);
     }
 
+    /// <summary>
+    /// Invokes the handler inline. <see cref="Progress{T}"/> posts to a synchronization context,
+    /// so with none installed its reports land on the thread pool and a test could assert against
+    /// a list that has not filled yet — passing whether or not anything was ever reported.
+    /// </summary>
+    private sealed class SyncProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
+    }
+
+    [Fact]
+    public void ProgressIsReportedOncePerRecognisedLine()
+    {
+        var reports = new List<(int Completed, int Total)>();
+        using SKBitmap originSrc = LoadImage("en_rec.jpg");
+
+        var result = Engine.Value.Detect(originSrc, RapidOcrOptions.Default,
+            CancellationToken.None,
+            new SyncProgress<(int Completed, int Total)>(reports.Add));
+
+        Assert.NotEmpty(reports);
+
+        // One report per detected line, counting up, with a total that never moves.
+        int total = reports[0].Total;
+        Assert.Equal(total, reports.Count);
+        Assert.Equal(Enumerable.Range(1, total), reports.Select(r => r.Completed));
+        Assert.All(reports, r => Assert.Equal(total, r.Total));
+
+        // Detected lines are what progress counts; blocks can be fewer, since recognition drops
+        // those below the text-score threshold.
+        Assert.True(total >= result.TextBlocks.Length);
+    }
+
     [Fact]
     public void UncancelledTokenChangesNothing()
     {
