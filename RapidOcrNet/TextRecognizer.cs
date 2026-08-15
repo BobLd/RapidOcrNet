@@ -62,19 +62,17 @@ public sealed class TextRecognizer : IDisposable
         }
     }
 
-    /// <param name="partImgs">Cropped text-line images, in detection order.</param>
-    /// <param name="cancellationToken">
-    /// Observed between crops. Recognition runs one ONNX inference per crop, so a crop boundary
-    /// is the finest granularity this stage can offer: a caller abandoning a page stops after the
-    /// current line instead of after the whole page. On a heavy model set that is the difference
-    /// between about a second and about a minute.
-    /// </param>
-    /// <param name="progress">
-    /// Reported after each crop as (recognised, total). Recognition is the long pole of a page and
-    /// its cost is per line, so this is the only stage where a caller can show real movement.
-    /// </param>
-    public TextLine[] GetTextLines(SKBitmap[] partImgs, CancellationToken cancellationToken = default,
-        IProgress<(int Completed, int Total)>? progress = null)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="partImages">Cropped text-line images, in detection order.</param>
+    /// <param name="progress">Reported after each crop as (recognised, total). Recognition is the long pole of a page and
+    /// its cost is per line, so this is the only stage where a caller can show real movement.</param>
+    /// <param name="cancellationToken">Observed between crops and, via <see cref="RunOptions.Terminate"/>, within each crop's own
+    /// inference. A caller abandoning a page stops inside the line being recognised rather than after it.</param>
+    public TextLine[] GetTextLines(SKBitmap[] partImages,
+        IProgress<(int Completed, int Total)>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         // NOTE: Python's pipeline batches crops by aspect ratio and zero-right-pads
         // each crop to 48 * max(w/h, 320/48) so the recognizer sees its training
@@ -83,24 +81,33 @@ public sealed class TextRecognizer : IDisposable
         // characters and 1-char substitutions on a few inputs. So we keep the legacy
         // per-image, tight-fit recognizer call (which the model evidently was
         // re-tuned for) while still recording CTC column indices.
-        var textLines = new TextLine[partImgs.Length];
-        for (int i = 0; i < partImgs.Length; i++)
+        var textLines = new TextLine[partImages.Length];
+        for (int i = 0; i < partImages.Length; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            textLines[i] = GetTextLine(partImgs[i]);
-            progress?.Report((i + 1, partImgs.Length));
+            textLines[i] = GetTextLine(partImages[i], cancellationToken);
+            progress?.Report((i + 1, partImages.Length));
         }
         return textLines;
     }
 
-    public TextLine GetTextLine(SKBitmap src)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="partImage"></param>
+    /// <param name="cancellationToken">Observed between crops and, via <see cref="RunOptions.Terminate"/>, within each crop's own
+    /// inference. A caller abandoning a page stops inside the line being recognised rather than after it.</param>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before or during the inference.
+    /// </exception>
+    public TextLine GetTextLine(SKBitmap partImage, CancellationToken cancellationToken = default)
     {
         var sw = ValueStopwatch.StartNew();
-        float scale = CrnnDstHeight / (float)src.Height;
-        int dstWidth = (int)(src.Width * scale);
+        float scale = CrnnDstHeight / (float)partImage.Height;
+        int dstWidth = (int)(partImage.Width * scale);
 
         Tensor<float> inputTensors;
-        using (SKBitmap srcResize = src.Resize(new SKSizeI(dstWidth, CrnnDstHeight), OcrUtils.NetworkSampling))
+        using (SKBitmap srcResize = partImage.Resize(new SKSizeI(dstWidth, CrnnDstHeight), OcrUtils.NetworkSampling))
         {
 //#if DEBUG
 //            using (var fs = new FileStream($"Recognizer_{Guid.NewGuid()}.png", FileMode.Create))
@@ -119,15 +126,13 @@ public sealed class TextRecognizer : IDisposable
 
         try
         {
-            using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _crnnNet.Run(inputs))
-            {
-                var result = results[0];
-                var tl = ScoreToTextLine(result.AsTensor<float>());
-                tl.Time = (float)sw.ElapsedMilliseconds;
-                return tl;
-            }
+            using var results = OrtRun.Run(_crnnNet, inputs, cancellationToken);
+            var result = results[0];
+            var tl = ScoreToTextLine(result.AsTensor<float>());
+            tl.Time = (float)sw.ElapsedMilliseconds;
+            return tl;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             System.Diagnostics.Debug.WriteLine(ex.Message + ex.StackTrace);
         }

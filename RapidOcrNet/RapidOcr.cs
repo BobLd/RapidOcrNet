@@ -8,7 +8,7 @@ using System.Text;
 
 namespace RapidOcrNet;
 
-public sealed class RapidOcr : IDisposable
+public sealed partial class RapidOcr : IDisposable
 {
     public const string ModelsFolderName = "models";
     public const string ModelsVersion = "v5";
@@ -86,50 +86,64 @@ public sealed class RapidOcr : IDisposable
         _textRecognizer.InitModel(models.RecModelPath, models.KeysPath, op);
     }
 
-    /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, CancellationToken)"/>
-    public OcrResult Detect(string path, RapidOcrOptions options,
-        CancellationToken cancellationToken = default,
-        IProgress<(int Completed, int Total)>? progress = null)
+    /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
+    public OcrResult Detect(string path, RapidOcrOptions options, CancellationToken cancellationToken = default)
     {
+        return Detect(path, options, null, cancellationToken);
+    }
+
+    /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
+    // progress is deliberately not optional: with a default it would make Detect(path, options)
+    // ambiguous against the overload above, which is the same call with everything defaulted.
+    public OcrResult Detect(string path, RapidOcrOptions options, IProgress<(int Completed, int Total)>? progress, CancellationToken cancellationToken = default)
+    {
+        // Decoding comes before any stage and is not cheap — a quarter of a second for a large
+        // page — so it is worth not starting it for a caller who has already given up.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!File.Exists(path))
         {
             throw new FileNotFoundException($"Could not find image to process: '{path}'.", path);
         }
 
-        using (var originSrc = SKBitmap.Decode(path))
-        {
-            return Detect(originSrc, options, cancellationToken, progress);
-        }
+        using var originSrc = SKBitmap.Decode(path);
+        return Detect(originSrc, options, progress, cancellationToken);
     }
 
-    /// <param name="cancellationToken">
-    /// Observed at every stage boundary, and between crops within the angle-classification and
-    /// recognition stages. A page is not interruptible mid-inference — the detector is a single
-    /// ONNX run — but recognition is one inference per detected line, so an abandoned page stops
-    /// after the current line rather than after the whole page. On a large model set that is
-    /// seconds instead of minutes.
+    /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
+    public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options, CancellationToken cancellationToken = default)
+    {
+        return Detect(originSrc, options, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the detection.
+    /// </summary>
+    /// <param name="originSrc"></param>
+    /// <param name="options"></param>
+    /// <param name="cancellationToken">Observed at every stage boundary, between crops within the angle-classification and
+    /// recognition stages, and inside each ONNX run itself: every inference carries a
+    /// <see cref="RunOptions"/> whose terminate flag the runtime reads once per kernel.
     /// </param>
+    /// <param name="progress">Reported during recognition as (lines recognised, lines detected). Nothing is reported
+    /// before detection finishes, because the line count is not known until then.</param>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was cancelled before the next stage or crop.
     /// </exception>
-    /// <param name="progress">
-    /// Reported during recognition as (lines recognised, lines detected). Nothing is reported
-    /// before detection finishes, because the line count is not known until then.
-    /// </param>
-    public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options,
-        CancellationToken cancellationToken = default,
-        IProgress<(int Completed, int Total)>? progress = null)
+    // progress is deliberately not optional: see the note on the path overload above.
+    public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options, IProgress<(int Completed, int Total)>? progress, CancellationToken cancellationToken = default)
     {
-        using var input = PrepareDetectorInput(originSrc, options);
+        using var input = PrepareDetectorInput(originSrc, options, cancellationToken);
         return DetectOnce(input,
             options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio,
             options.DoAngle, options.MostAngle,
             options.ReturnWordBox, options.ReturnSingleCharBox,
             options.TextScore, options.ClsThresh,
             options.ClsPreserveAspectRatio,
-            cancellationToken, progress);
+            progress,
+            cancellationToken);
     }
-
+    
     /// <summary>
     /// Runs the detection stage only and returns the raw text boxes, skipping angle
     /// classification and recognition. Mirrors Python rapidocr's
@@ -140,33 +154,39 @@ public sealed class RapidOcr : IDisposable
     /// <param name="path">Path to the source image.</param>
     /// <param name="options">Detection options. Recognition-only fields (TextScore,
     /// ReturnWordBox, ClsThresh, etc.) are ignored on this path.</param>
+    /// <param name="cancellationToken"></param>
     /// <returns>Boxes in source-image coordinates, sorted in reading order.</returns>
-    public IReadOnlyList<TextBox> DetectBoxes(string path, RapidOcrOptions options,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TextBox> DetectBoxes(string path, RapidOcrOptions options, CancellationToken cancellationToken = default)
     {
+        // As in Detect(string, ...): do not decode on behalf of a caller who has already given up.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!File.Exists(path))
         {
             throw new FileNotFoundException($"Could not find image to process: '{path}'.", path);
         }
 
-        using (var originSrc = SKBitmap.Decode(path))
-        {
-            return DetectBoxes(originSrc, options, cancellationToken);
-        }
+        using var originSrc = SKBitmap.Decode(path);
+        return DetectBoxes(originSrc, options, cancellationToken);
     }
 
     /// <summary>
     /// Runs the detection stage only and returns the raw text boxes, skipping angle
-    /// classification and recognition. See <see cref="DetectBoxes(string, RapidOcrOptions)"/>.
+    /// classification and recognition.
     /// </summary>
-    public IReadOnlyList<TextBox> DetectBoxes(SKBitmap originSrc, RapidOcrOptions options,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TextBox> DetectBoxes(SKBitmap originSrc, RapidOcrOptions options, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var input = PrepareDetectorInput(originSrc, options);
+        using var input = PrepareDetectorInput(originSrc, options, cancellationToken);
         var textBoxes = _textDetector.GetTextBoxes(input.Bitmap, input.Scale,
-            options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio) ?? [];
+            options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio, cancellationToken) ?? [];
+
+        // Terminate only reaches the inference, and the stage does not end there: contour
+        // finding, per-contour scoring, unclipping and sorting all run afterwards in managed
+        // code. Without this the boxes would still be mapped and returned as a complete result
+        // to a caller who has already given up. DetectOnce checks at the same point.
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Map from letterboxed-image space back into the original image's space, the
         // same transform Detect applies to TextBlock.BoxPoints. Boxes own fresh
@@ -179,37 +199,58 @@ public sealed class RapidOcr : IDisposable
         return textBoxes;
     }
 
-    private static DetectorInput PrepareDetectorInput(SKBitmap originSrc, RapidOcrOptions options)
+    /// <param name="cancellationToken">
+    /// Observed between the steps below. These run before the first stage and can dominate the
+    /// call on a large image — padding a 5184x6708 page allocates and blits some 140MB, around
+    /// 900ms — so a caller who has already given up should not be made to wait the whole of it
+    /// out. Each step is a single Skia operation and so is not itself interruptible; a step
+    /// boundary is the finest granularity available here.
+    /// </param>
+    private static DetectorInput PrepareDetectorInput(SKBitmap originSrc, RapidOcrOptions options, CancellationToken cancellationToken = default)
     {
+        // Before anything is allocated, which is the whole point on a large page.
+        cancellationToken.ThrowIfCancellationRequested();
+
         int outerPadding = Math.Max(0, options.Padding);
         SKBitmap outerPadded = originSrc;
         SKBitmap? ownedOuter = null;
-        if (outerPadding > 0)
-        {
-            ownedOuter = OcrUtils.MakePadding(originSrc, outerPadding);
-            outerPadded = ownedOuter;
-        }
-
-        // PP-OCR resize_image_within_bounds: bring the input within [MinSideLen, MaxSideLen]
-        // before any further processing. Skipped when caller forces legacy behavior with
-        // ImgResize > 0 (so existing callers keep their pixel-for-pixel detector input).
-        SKBitmap bounded = outerPadded;
         SKBitmap? ownedBounded = null;
-        if (options.ImgResize <= 0)
-        {
-            bounded = OcrUtils.ResizeImageWithinBounds(outerPadded, options.MinSideLen, options.MaxSideLen, out bool boundOwned);
-            if (boundOwned)
-            {
-                ownedBounded = bounded;
-            }
-        }
+        SKBitmap? ownedLetterbox = null;
 
-        SKBitmap letterboxed = OcrUtils.ApplyVerticalLetterbox(bounded, options.WidthHeightRatio, options.MinHeight, out int letterboxTop);
-        SKBitmap? ownedLetterbox = !ReferenceEquals(letterboxed, bounded) ? letterboxed : null;
-
-        ScaleParam scale;
+        // Everything that can allocate is inside, so an exception from any step — cancellation or
+        // otherwise — takes the bitmaps already allocated with it. Previously only the scale
+        // computation was guarded, and a throw from either resize leaked whatever came before it.
         try
         {
+            if (outerPadding > 0)
+            {
+                ownedOuter = OcrUtils.MakePadding(originSrc, outerPadding);
+                outerPadded = ownedOuter;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // PP-OCR resize_image_within_bounds: bring the input within [MinSideLen, MaxSideLen]
+            // before any further processing. Skipped when caller forces legacy behavior with
+            // ImgResize > 0 (so existing callers keep their pixel-for-pixel detector input).
+            SKBitmap bounded = outerPadded;
+            if (options.ImgResize <= 0)
+            {
+                bounded = OcrUtils.ResizeImageWithinBounds(outerPadded, options.MinSideLen, options.MaxSideLen, out bool boundOwned);
+                if (boundOwned)
+                {
+                    ownedBounded = bounded;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            SKBitmap letterboxed = OcrUtils.ApplyVerticalLetterbox(bounded, options.WidthHeightRatio, options.MinHeight, out int letterboxTop);
+            ownedLetterbox = !ReferenceEquals(letterboxed, bounded) ? letterboxed : null;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            ScaleParam scale;
             if (options.ImgResize > 0)
             {
                 // Legacy path: explicit max-side cap. Caps at source size for tiny
@@ -225,6 +266,19 @@ public sealed class RapidOcr : IDisposable
                 // matching rapidocr-python's Det.limit_type="min" config.
                 scale = ScaleParam.GetAdaptiveScaleParam(letterboxed, options.LimitSideLen);
             }
+
+            // Bound ratio = pre-resize size / bounded size, per axis (the two sides are
+            // rounded to /32 independently, so they can differ). This is Python rapidocr's
+            // ratio_w / ratio_h from resize_image_within_bounds, used to map detector-space
+            // coordinates back up into the original image. When ResizeImageWithinBounds was a
+            // no-op (typical inputs, or the legacy ImgResize path), bounded == outerPadded so
+            // both ratios are exactly 1.
+            float boundRatioW = outerPadded.Width / (float)bounded.Width;
+            float boundRatioH = outerPadded.Height / (float)bounded.Height;
+
+            return new DetectorInput(letterboxed, scale, outerPadding, letterboxTop,
+                boundRatioW, boundRatioH, originSrc.Width, originSrc.Height,
+                ownedOuter, ownedBounded, ownedLetterbox);
         }
         catch
         {
@@ -233,19 +287,6 @@ public sealed class RapidOcr : IDisposable
             ownedOuter?.Dispose();
             throw;
         }
-
-        // Bound ratio = pre-resize size / bounded size, per axis (the two sides are
-        // rounded to /32 independently, so they can differ). This is Python rapidocr's
-        // ratio_w / ratio_h from resize_image_within_bounds, used to map detector-space
-        // coordinates back up into the original image. When ResizeImageWithinBounds was a
-        // no-op (typical inputs, or the legacy ImgResize path), bounded == outerPadded so
-        // both ratios are exactly 1.
-        float boundRatioW = outerPadded.Width / (float)bounded.Width;
-        float boundRatioH = outerPadded.Height / (float)bounded.Height;
-
-        return new DetectorInput(letterboxed, scale, outerPadding, letterboxTop,
-            boundRatioW, boundRatioH, originSrc.Width, originSrc.Height,
-            ownedOuter, ownedBounded, ownedLetterbox);
     }
 
     private readonly struct DetectorInput : IDisposable
@@ -302,8 +343,9 @@ public sealed class RapidOcr : IDisposable
     private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio, bool doAngle, bool mostAngle,
         bool returnWordBox, bool returnSingleCharBox, float textScore, float clsThresh,
-        bool clsPreserveAspectRatio, CancellationToken cancellationToken = default,
-        IProgress<(int Completed, int Total)>? progress = null)
+        bool clsPreserveAspectRatio,
+        IProgress<(int Completed, int Total)>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         SKBitmap src = input.Bitmap;
 
@@ -313,7 +355,8 @@ public sealed class RapidOcr : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         // step: dbNet getTextBoxes
-        var textBoxes = _textDetector.GetTextBoxes(src, input.Scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
+        var textBoxes = _textDetector.GetTextBoxes(src, input.Scale, boxScoreThresh, boxThresh, unClipRatio,
+            cancellationToken) ?? [];
         var dbNetTime = sw.ElapsedMilliseconds;
 
         // Cheapest place to abandon a page: detection is done, but the per-line stages that
@@ -361,7 +404,7 @@ public sealed class RapidOcr : IDisposable
             }
 
             // step: crnnNet getTextLines
-            textLines = _textRecognizer.GetTextLines(partImages, cancellationToken, progress);
+            textLines = _textRecognizer.GetTextLines(partImages, progress, cancellationToken);
         }
         finally
         {
@@ -527,7 +570,12 @@ public sealed class RapidOcr : IDisposable
     /// </summary>
     /// <remarks>The returned SessionOptions object has GraphOptimizationLevel set to
     /// ORT_ENABLE_EXTENDED. Both InterOpNumThreads and IntraOpNumThreads are set to the value of
-    /// numThread.</remarks>
+    /// numThread.
+    /// <para>
+    /// No value of <paramref name="numThread"/> weakens cancellation: it is built on
+    /// <see cref="RunOptions.Terminate"/>, which the executor reads on whichever thread walks the
+    /// graph, so even <c>numThread: 1</c> stays interruptible mid-inference.
+    /// </para></remarks>
     /// <param name="numThread">The number of threads to use for both inter- and intra-operation parallelism. If set to 0, the default
     /// thread count is used.</param>
     /// <returns>A SessionOptions instance with extended graph optimization enabled and thread counts set according to the

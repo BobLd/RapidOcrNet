@@ -90,8 +90,16 @@ public sealed class TextDetector : IDisposable
         InitModel(path, sessionOptions);
     }
 
+    /// <param name="cancellationToken">
+    /// Observed before the run and, through <see cref="RunOptions.Terminate"/>, during it.
+    /// Detection is a single inference over the whole page, so without that the stage would only
+    /// be interruptible at its edges — which, on a large image, is no interruption at all.
+    /// </param>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before or during the inference.
+    /// </exception>
     public IReadOnlyList<TextBox>? GetTextBoxes(SKBitmap src, ScaleParam scale, float boxScoreThresh, float boxThresh,
-        float unClipRatio)
+        float unClipRatio, CancellationToken cancellationToken = default)
     {
         Tensor<float> inputTensors;
         using (var srcResize = src.Resize(new SKSizeI(scale.DstWidth, scale.DstHeight), OcrUtils.NetworkSampling))
@@ -108,20 +116,18 @@ public sealed class TextDetector : IDisposable
             inputTensors = OcrUtils.SubtractMeanNormalize(srcResize, _meanValues, _normValues);
         }
 
-        IReadOnlyCollection<NamedOnnxValue> inputs = new NamedOnnxValue[]
-        {
-                NamedOnnxValue.CreateFromTensor(_inputName, inputTensors)
-        };
+        IReadOnlyCollection<NamedOnnxValue> inputs =
+        [
+            NamedOnnxValue.CreateFromTensor(_inputName, inputTensors)
+        ];
 
         try
         {
-            using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _dbNet.Run(inputs))
-            {
-                return GetTextBoxes(results[0], scale.DstHeight, scale.DstWidth, scale, boxScoreThresh,
-                    boxThresh, unClipRatio);
-            }
+            using var results = OrtRun.Run(_dbNet, inputs, cancellationToken);
+            return GetTextBoxes(results[0], scale.DstHeight, scale.DstWidth, scale, boxScoreThresh,
+                boxThresh, unClipRatio);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             System.Diagnostics.Debug.WriteLine(ex.Message + ex.StackTrace);
         }

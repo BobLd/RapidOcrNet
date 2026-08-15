@@ -48,6 +48,22 @@ foreach (var block in result.TextBlocks)
 
 `Detect` has two overloads — pass a file path (`string`) for convenience, or an `SKBitmap` if you already have the image decoded.
 
+## Awaiting, cancelling and reporting progress
+`DetectAsync` and `DetectBoxesAsync` mirror their synchronous counterparts, and both overloads (`string` path or `SKBitmap`) are available:
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+var progress = new Progress<(int Completed, int Total)>(
+    p => Console.WriteLine($"{p.Completed}/{p.Total} lines"));
+
+OcrResult result = await ocr.DetectAsync("image.png", RapidOcrOptions.Default, progress, cts.Token);
+```
+
+**Cancellation** is observed at every stage boundary, between crops, and *inside each ONNX run* — every inference carries a `RunOptions` whose terminate flag the runtime checks once per kernel. So a cancelled page stops where it stands, including part-way through detection, which is a single run over the whole image and on a large scan the longest stretch with no boundary to wait for. A cancelled call throws `OperationCanceledException` and disposes the crops it had allocated.
+
+**Progress** is reported during recognition as `(lines recognised, lines detected)`. Nothing is reported before detection finishes, because the line count is not known until then.
+
+> **What `async` buys you here.** OCR is CPU-bound end to end — ONNX inference, Skia resampling, contour finding, CTC decoding — so `DetectAsync` moves the work to the thread pool rather than freeing a thread. Await it to keep a UI thread responsive; it will not raise throughput on a server. ONNX Runtime's `InferenceSession.RunAsync` would not change that: it schedules the same blocking `Run` onto the intra-op thread pool, contending with the parallelism of the inference itself, and its C# binding additionally requires every output preallocated at exactly the right shape. It is deliberately not used.
+
 ## Drawing the boxes back onto the image
 Each `TextBlock` exposes the four corners of its detected polygon in `BoxPoints` (in clockwise order, in source-image pixel coordinates).
 ```csharp
@@ -140,6 +156,8 @@ ocr.InitModels(sessionOptions);
 ```
 
 `GetDefaultSessionOptions(int numThread = 0)` also takes an optional thread count if you'd rather keep CPU execution but pin Inter/Intra-op parallelism.
+
+Cancellation is independent of all of this. The terminate flag is read by whichever thread is walking the graph — under the default sequential execution mode, the calling thread itself — so `InitModels(numThread: 1)` cancels exactly like a fully parallel session. On a non-CPU execution provider the flag stops the graph walk rather than recalling work already dispatched to the device queue, so cancellation is prompt but not instant.
 
 ## Choosing models (PP-OCRv5 vs PP-OCRv6)
 `RapidOcrModelSet` bundles a complete set of models (detector + classifier + recognizer + dictionary) plus the detector's normalization, so you can switch model families with a single argument. Pass a preset to `InitModels`:

@@ -62,8 +62,9 @@ public sealed class TextClassifier : IDisposable
     }
 
     /// <param name="cancellationToken">
-    /// Observed between crops, which is one ONNX inference each. Only meaningful when
-    /// <paramref name="doAngle"/> is set; the no-angle path does no work to interrupt.
+    /// Observed between crops and, via <see cref="RunOptions.Terminate"/>, within each crop's own
+    /// inference. Only meaningful when <paramref name="doAngle"/> is set; the no-angle path does
+    /// no work to interrupt.
     /// </param>
     public Angle[] GetAngles(SKBitmap[] partImgs, bool doAngle, bool mostAngle,
         bool preserveAspectRatio = false, CancellationToken cancellationToken = default)
@@ -74,7 +75,7 @@ public sealed class TextClassifier : IDisposable
             for (int i = 0; i < partImgs.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                angles[i] = GetAngle(partImgs[i], preserveAspectRatio);
+                angles[i] = GetAngle(partImgs[i], preserveAspectRatio, cancellationToken);
             }
 
             // Most Possible AngleIndex
@@ -112,7 +113,13 @@ public sealed class TextClassifier : IDisposable
 
     public Angle GetAngle(SKBitmap src) => GetAngle(src, preserveAspectRatio: false);
 
-    public Angle GetAngle(SKBitmap src, bool preserveAspectRatio)
+    /// <param name="cancellationToken">
+    /// Observed before the run and, through <see cref="RunOptions.Terminate"/>, during it.
+    /// </param>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before or during the inference.
+    /// </exception>
+    public Angle GetAngle(SKBitmap src, bool preserveAspectRatio, CancellationToken cancellationToken = default)
     {
         var sw = ValueStopwatch.StartNew();
         Tensor<float> inputTensors;
@@ -160,26 +167,24 @@ public sealed class TextClassifier : IDisposable
 
         try
         {
-            using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _angleNet.Run(inputs))
+            using var results = OrtRun.Run(_angleNet, inputs, cancellationToken);
+            var outputTensor = results[0];
+
+            ReadOnlySpan<float> outputData;
+            if (outputTensor.AsTensor<float>() is DenseTensor<float> dt)
             {
-                var outputTensor = results[0];
-
-                ReadOnlySpan<float> outputData;
-                if (outputTensor.AsTensor<float>() is DenseTensor<float> dt)
-                {
-                    outputData = dt.Buffer.Span;
-                }
-                else
-                {
-                    outputData = outputTensor.AsEnumerable<float>().ToArray();
-                }
-
-                var angle = ScoreToAngle(outputData, AngleCols);
-                angle.Time = (float)sw.ElapsedMilliseconds;
-                return angle;
+                outputData = dt.Buffer.Span;
             }
+            else
+            {
+                outputData = outputTensor.AsEnumerable<float>().ToArray();
+            }
+
+            var angle = ScoreToAngle(outputData, AngleCols);
+            angle.Time = (float)sw.ElapsedMilliseconds;
+            return angle;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             System.Diagnostics.Debug.WriteLine(ex.Message + ex.StackTrace);
             //throw;
