@@ -186,6 +186,7 @@ public sealed class TextRecognizer : IDisposable
         };
     }
 
+    /* Not in use. If need to uncomment, Rgba8888 needs to be added
     private static void WriteImageIntoBatch(SKBitmap src, Tensor<float> batch, int batchIdx, int batchW)
     {
         int rows = src.Height;
@@ -229,6 +230,7 @@ public sealed class TextRecognizer : IDisposable
             throw new ArgumentException($"Recognizer crop must be '{SKColorType.Bgra8888}' or '{SKColorType.Gray8}'.");
         }
     }
+    */
 
     private TextLine ScoreToTextLineFromBatch(Tensor<float> srcData, int batchIdx, int h, int w)
     {

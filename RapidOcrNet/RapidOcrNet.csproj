@@ -30,7 +30,20 @@
 		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
 		<PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.29.0" />
 		<PackageReference Include="SkiaSharp" Version="3.119.1" />
-		<PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
+		<!--
+		  NoDependencies rather than the default Linux native assets. The linux-arm64 binary in
+		  SkiaSharp.NativeAssets.Linux 3.119.1 leaves uuid_generate_random, uuid_copy, uuid_parse
+		  and uuid_unparse undefined while declaring no DT_NEEDED entry that provides them (the
+		  linux-x64 binary of the same package needs libfontconfig.so.1 and references no uuid
+		  symbols at all). The loader has nothing to resolve them against, so any arm64 Linux
+		  consumer crashes on load with "undefined symbol: uuid_generate_random" — installing
+		  fontconfig does not help, because the arm64 binary never asks for it.
+
+		  The NoDependencies build links neither fontconfig nor uuid on either architecture. Its
+		  only loss is the system font manager, and nothing here renders text: Skia is used for
+		  bitmap resizing, canvas composition and path filling only.
+		-->
+		<PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.1" />
 	</ItemGroup>
 
 	<ItemGroup>

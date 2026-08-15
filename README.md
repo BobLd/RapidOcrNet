@@ -1,4 +1,9 @@
 # RapidOcrNet
+
+[![Windows](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-windows.yml/badge.svg)](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-windows.yml)
+[![Linux](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-linux.yml/badge.svg)](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-linux.yml)
+[![macOS](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-macos.yml/badge.svg)](https://github.com/BobLd/RapidOcrNet/actions/workflows/tests-macos.yml)
+
 Cross-platform OCR processing library using PaddleOCR ONNX models, and based on original code from RapidAI's [RapidOCR](https://github.com/RapidAI/RapidOCR).
 
 Available as NuGet package: https://www.nuget.org/packages/RapidOcrNet/

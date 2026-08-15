@@ -108,9 +108,27 @@ internal static class OcrUtils
                 }
             }
         }
+        else if (src.Info.ColorType == SKColorType.Rgba8888)
+        {
+            for (int r = 0; r < rows; ++r)
+            {
+                int rowBase = r * rowBytes;
+                for (int c = 0; c < cols; ++c)
+                {
+                    int pixelBase = rowBase + c * channels;
+                    for (int ch = 0; ch < expChannels; ++ch)
+                    {
+                        byte value = span[pixelBase + (expChannels - 1 - ch)];
+                        inputTensor[index, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
+                    }
+                }
+            }
+        }
         else
         {
-            throw new ArgumentException($"This image needs to be '{SKColorType.Bgra8888}' or '{SKColorType.Gray8}', but got '{src.Info.ColorType}'.");
+            throw new ArgumentException(
+                $"This image needs to be '{SKColorType.Bgra8888}', '{SKColorType.Rgba8888}' or " +
+                $"'{SKColorType.Gray8}', but got '{src.Info.ColorType}'.");
         }
 
         return inputTensor;

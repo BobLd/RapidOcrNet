@@ -1,0 +1,73 @@
+name: macOS
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+# Scoped by workflow name, so the three platform workflows never cancel one another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # No architecture matrix here, unlike the Windows and Linux workflows, and not by oversight:
+  # Microsoft.ML.OnnxRuntime ships osx-arm64 and no osx-x64, so the Intel runner (macos-13) has no
+  # native ONNX Runtime to load. macos-latest is Apple silicon and must stay that way.
+  test:
+    name: macos-arm64
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The ONNX models are committed to the repository rather than fetched, so the checkout above
+      # is all the test data this needs.
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # Both target frameworks the projects build for.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore RapidOcrNet.sln
+
+      # Builds both target frameworks. With no global.json the highest installed SDK is selected,
+      # so the .NET 10 SDK does the building and net8.0 comes from its targeting pack; the .NET 8
+      # SDK installed above is there to supply the runtime the net8.0 tests execute on.
+      - name: Build
+        run: dotnet build RapidOcrNet.sln -c Release --no-restore
+
+      # One step per target framework rather than one over both, so a failure says which framework
+      # it belongs to. The .trx names carry the framework for the same reason — a shared name would
+      # have the second run overwrite the first in the artifact.
+      - name: Test (net8.0)
+        run: >
+          dotnet test RapidOcrNet.Tests/RapidOcrNet.Tests.csproj
+          -c Release -f net8.0 --no-build
+          --logger "trx;LogFileName=macos-arm64-net8.0.trx"
+          --results-directory TestResults
+
+      - name: Test (net10.0)
+        # Runs even when net8.0 failed: whether a failure is specific to one target framework is
+        # most of the diagnosis, and finding that out should not need a second push.
+        if: ${{ !cancelled() }}
+        run: >
+          dotnet test RapidOcrNet.Tests/RapidOcrNet.Tests.csproj
+          -c Release -f net10.0 --no-build
+          --logger "trx;LogFileName=macos-arm64-net10.0.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos-arm64
+          path: TestResults/*.trx
+          if-no-files-found: warn
