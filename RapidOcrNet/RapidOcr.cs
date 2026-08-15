@@ -86,7 +86,9 @@ public sealed class RapidOcr : IDisposable
         _textRecognizer.InitModel(models.RecModelPath, models.KeysPath, op);
     }
 
-    public OcrResult Detect(string path, RapidOcrOptions options)
+    /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, CancellationToken)"/>
+    public OcrResult Detect(string path, RapidOcrOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
         {
@@ -95,11 +97,22 @@ public sealed class RapidOcr : IDisposable
 
         using (var originSrc = SKBitmap.Decode(path))
         {
-            return Detect(originSrc, options);
+            return Detect(originSrc, options, cancellationToken);
         }
     }
 
-    public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options)
+    /// <param name="cancellationToken">
+    /// Observed at every stage boundary, and between crops within the angle-classification and
+    /// recognition stages. A page is not interruptible mid-inference — the detector is a single
+    /// ONNX run — but recognition is one inference per detected line, so an abandoned page stops
+    /// after the current line rather than after the whole page. On a large model set that is
+    /// seconds instead of minutes.
+    /// </param>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before the next stage or crop.
+    /// </exception>
+    public OcrResult Detect(SKBitmap originSrc, RapidOcrOptions options,
+        CancellationToken cancellationToken = default)
     {
         using var input = PrepareDetectorInput(originSrc, options);
         return DetectOnce(input,
@@ -107,7 +120,8 @@ public sealed class RapidOcr : IDisposable
             options.DoAngle, options.MostAngle,
             options.ReturnWordBox, options.ReturnSingleCharBox,
             options.TextScore, options.ClsThresh,
-            options.ClsPreserveAspectRatio);
+            options.ClsPreserveAspectRatio,
+            cancellationToken);
     }
 
     /// <summary>
@@ -121,7 +135,8 @@ public sealed class RapidOcr : IDisposable
     /// <param name="options">Detection options. Recognition-only fields (TextScore,
     /// ReturnWordBox, ClsThresh, etc.) are ignored on this path.</param>
     /// <returns>Boxes in source-image coordinates, sorted in reading order.</returns>
-    public IReadOnlyList<TextBox> DetectBoxes(string path, RapidOcrOptions options)
+    public IReadOnlyList<TextBox> DetectBoxes(string path, RapidOcrOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
         {
@@ -130,7 +145,7 @@ public sealed class RapidOcr : IDisposable
 
         using (var originSrc = SKBitmap.Decode(path))
         {
-            return DetectBoxes(originSrc, options);
+            return DetectBoxes(originSrc, options, cancellationToken);
         }
     }
 
@@ -138,8 +153,11 @@ public sealed class RapidOcr : IDisposable
     /// Runs the detection stage only and returns the raw text boxes, skipping angle
     /// classification and recognition. See <see cref="DetectBoxes(string, RapidOcrOptions)"/>.
     /// </summary>
-    public IReadOnlyList<TextBox> DetectBoxes(SKBitmap originSrc, RapidOcrOptions options)
+    public IReadOnlyList<TextBox> DetectBoxes(SKBitmap originSrc, RapidOcrOptions options,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         using var input = PrepareDetectorInput(originSrc, options);
         var textBoxes = _textDetector.GetTextBoxes(input.Bitmap, input.Scale,
             options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio) ?? [];
@@ -278,16 +296,22 @@ public sealed class RapidOcr : IDisposable
     private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio, bool doAngle, bool mostAngle,
         bool returnWordBox, bool returnSingleCharBox, float textScore, float clsThresh,
-        bool clsPreserveAspectRatio)
+        bool clsPreserveAspectRatio, CancellationToken cancellationToken = default)
     {
         SKBitmap src = input.Bitmap;
 
         // Start detect
         var sw = ValueStopwatch.StartNew();
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         // step: dbNet getTextBoxes
         var textBoxes = _textDetector.GetTextBoxes(src, input.Scale, boxScoreThresh, boxThresh, unClipRatio) ?? [];
         var dbNetTime = sw.ElapsedMilliseconds;
+
+        // Cheapest place to abandon a page: detection is done, but the per-line stages that
+        // dominate the cost have not started, and no crops have been allocated yet.
+        cancellationToken.ThrowIfCancellationRequested();
 
         // getPartImages: capture crop bookkeeping when word boxes are requested.
         // Both overloads now dispose partial results internally if a crop throws midway.
@@ -304,32 +328,42 @@ public sealed class RapidOcr : IDisposable
         }
 
         // step: angleNet getAngles
-        Angle[] angles = _textClassifier.GetAngles(partImages, doAngle, mostAngle, clsPreserveAspectRatio);
-
-        // Rotate partImgs only if the classifier is confident enough (Python <c>cls_thresh</c>).
-        // Without this gate, low-confidence flips wrongly invert clean upright text and the
-        // recognizer produces garbage like "1997" → "L66" or "This" → "s".
-        for (int i = 0; i < partImages.Length; ++i)
+        Angle[] angles;
+        TextLine[] textLines;
+        try
         {
-            if (angles[i].Index == 1 && angles[i].Score >= clsThresh)
+            angles = _textClassifier.GetAngles(partImages, doAngle, mostAngle, clsPreserveAspectRatio,
+                cancellationToken);
+
+            // Rotate partImgs only if the classifier is confident enough (Python <c>cls_thresh</c>).
+            // Without this gate, low-confidence flips wrongly invert clean upright text and the
+            // recognizer produces garbage like "1997" → "L66" or "This" → "s".
+            for (int i = 0; i < partImages.Length; ++i)
             {
-                var original = partImages[i];
-                partImages[i] = OcrUtils.BitmapRotateClockWise180(original);
-                original.Dispose();
+                if (angles[i].Index == 1 && angles[i].Score >= clsThresh)
+                {
+                    var original = partImages[i];
+                    partImages[i] = OcrUtils.BitmapRotateClockWise180(original);
+                    original.Dispose();
+                }
+                else if (angles[i].Index == 1)
+                {
+                    // Below threshold, treat as no-flip for downstream consumers / word-box mapping.
+                    angles[i].Index = 0;
+                }
             }
-            else if (angles[i].Index == 1)
-            {
-                // Below threshold, treat as no-flip for downstream consumers / word-box mapping.
-                angles[i].Index = 0;
-            }
+
+            // step: crnnNet getTextLines
+            textLines = _textRecognizer.GetTextLines(partImages, cancellationToken);
         }
-
-        // step: crnnNet getTextLines
-        TextLine[] textLines = _textRecognizer.GetTextLines(partImages);
-
-        foreach (var bmp in partImages)
+        finally
         {
-            bmp.Dispose();
+            // Cancellation unwinds through here as well. The crops are native Skia bitmaps, so
+            // leaking them on an abandoned page would be the one lasting cost of giving up.
+            foreach (var bmp in partImages)
+            {
+                bmp?.Dispose();
+            }
         }
 
         var textBlocks = new TextBlock[textLines.Length];

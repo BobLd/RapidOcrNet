@@ -62,7 +62,14 @@ public sealed class TextRecognizer : IDisposable
         }
     }
 
-    public TextLine[] GetTextLines(SKBitmap[] partImgs)
+    /// <param name="partImgs">Cropped text-line images, in detection order.</param>
+    /// <param name="cancellationToken">
+    /// Observed between crops. Recognition runs one ONNX inference per crop, so a crop boundary
+    /// is the finest granularity this stage can offer: a caller abandoning a page stops after the
+    /// current line instead of after the whole page. On a heavy model set that is the difference
+    /// between about a second and about a minute.
+    /// </param>
+    public TextLine[] GetTextLines(SKBitmap[] partImgs, CancellationToken cancellationToken = default)
     {
         // NOTE: Python's pipeline batches crops by aspect ratio and zero-right-pads
         // each crop to 48 * max(w/h, 320/48) so the recognizer sees its training
@@ -74,6 +81,7 @@ public sealed class TextRecognizer : IDisposable
         var textLines = new TextLine[partImgs.Length];
         for (int i = 0; i < partImgs.Length; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             textLines[i] = GetTextLine(partImgs[i]);
         }
         return textLines;

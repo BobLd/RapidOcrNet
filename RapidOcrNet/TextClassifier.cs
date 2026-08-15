@@ -61,13 +61,19 @@ public sealed class TextClassifier : IDisposable
         InitModel(path, sessionOptions);
     }
 
-    public Angle[] GetAngles(SKBitmap[] partImgs, bool doAngle, bool mostAngle, bool preserveAspectRatio = false)
+    /// <param name="cancellationToken">
+    /// Observed between crops, which is one ONNX inference each. Only meaningful when
+    /// <paramref name="doAngle"/> is set; the no-angle path does no work to interrupt.
+    /// </param>
+    public Angle[] GetAngles(SKBitmap[] partImgs, bool doAngle, bool mostAngle,
+        bool preserveAspectRatio = false, CancellationToken cancellationToken = default)
     {
         var angles = new Angle[partImgs.Length];
         if (doAngle)
         {
             for (int i = 0; i < partImgs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 angles[i] = GetAngle(partImgs[i], preserveAspectRatio);
             }
 
