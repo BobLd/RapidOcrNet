@@ -11,13 +11,6 @@ public class OcrTestV6Small
         return ocr;
     });
 
-    public static IEnumerable<object[]> V6ModelSets => new[]
-    {
-        new object[] { "tiny", RapidOcrModelSet.PPOCRv6Tiny },
-        new object[] { "small", RapidOcrModelSet.PPOCRv6Small },
-        new object[] { "medium", RapidOcrModelSet.PPOCRv6Medium },
-    };
-
     /// <summary>
     /// Smoke test for PP-OCRv6: each size loads and produces non-empty output on a clean
     /// English image. Exact-string assertions are intentionally omitted here because v6
@@ -25,15 +18,16 @@ public class OcrTestV6Small
     /// config, which is not verifiable without running inference. A v6 detector that misses
     /// every box (e.g. wrong mean/std) will fail this test.
     /// </summary>
-    [Theory]
-    [MemberData(nameof(V6ModelSets))]
-    public void OcrV6SmokeTest(string size, RapidOcrModelSet models)
+    /// <remarks>
+    /// One test per size rather than a theory over all three. The sizes differ in whether their
+    /// models are on disk at all — medium is not committed — and xUnit v2 can only skip a whole
+    /// theory, never a single row, so a theory here would have to fail for medium or hide the
+    /// other two behind it.
+    /// </remarks>
+    private static void AssertSmokeTestPasses(V6Size size)
     {
-        _ = size;
-
-        Assert.True(File.Exists(models.DetModelPath), $"Missing v6 detector model: '{models.DetModelPath}'.");
-        Assert.True(File.Exists(models.RecModelPath), $"Missing v6 recognizer model: '{models.RecModelPath}'.");
-        Assert.True(File.Exists(models.KeysPath), $"Missing v6 keys file: '{models.KeysPath}'.");
+        // Availability is the attribute's job: reaching here means the models are present.
+        var models = V6Models.For(size);
 
         string path = Path.Combine("images", "en_rec.jpg");
         Assert.True(File.Exists(path));
@@ -48,6 +42,18 @@ public class OcrTestV6Small
         Assert.NotEmpty(ocrResult.TextBlocks);
         Assert.Contains(ocrResult.TextBlocks, b => !string.IsNullOrWhiteSpace(b.Text));
     }
+
+    /// <inheritdoc cref="AssertSmokeTestPasses"/>
+    [V6Fact(V6Size.Tiny)]
+    public void OcrV6SmokeTestTiny() => AssertSmokeTestPasses(V6Size.Tiny);
+
+    /// <inheritdoc cref="AssertSmokeTestPasses"/>
+    [V6Fact(V6Size.Small)]
+    public void OcrV6SmokeTestSmall() => AssertSmokeTestPasses(V6Size.Small);
+
+    /// <inheritdoc cref="AssertSmokeTestPasses"/>
+    [V6Fact(V6Size.Medium)]
+    public void OcrV6SmokeTestMedium() => AssertSmokeTestPasses(V6Size.Medium);
 
     // Expected text blocks for PP-OCRv6 small. Captured by running the small model with
     // RapidOcrOptions.PPOCRv6 (the option set v6 is designed for) and verified by eye
@@ -415,7 +421,7 @@ public class OcrTestV6Small
     /// Text-block recognition using the PP-OCRv6 small models. Mirrors <see cref="OcrTextBlock"/>
     /// but with the v6 small engine and <see cref="RapidOcrOptions.PPOCRv6"/> options.
     /// </summary>
-    [Theory]
+    [V6Theory(V6Size.Small)]
     [MemberData(nameof(Images))]
     public void OcrTextBlock(string path, string[] expected)
     {
@@ -445,7 +451,7 @@ public class OcrTestV6Small
     /// <see cref="OcrWordBox"/> but with the v6 small engine and
     /// <see cref="RapidOcrOptions.PPOCRv6"/> options.
     /// </summary>
-    [Theory]
+    [V6Theory(V6Size.Small)]
     [MemberData(nameof(ImagesWords))]
     public void OcrWordBox(string path, string[] expected)
     {
@@ -476,7 +482,7 @@ public class OcrTestV6Small
         }
     }
 
-    [Theory]
+    [V6Theory(V6Size.Small)]
     [MemberData(nameof(TesseractImages))]
     public void TesseractOcrTextBlock(string path, string[] expected)
     {
