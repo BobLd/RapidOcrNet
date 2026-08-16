@@ -217,6 +217,7 @@ public sealed class TextClassifier : IDisposable
 
     public void Dispose()
     {
-        _angleNet.Dispose();
+        // See TextRecognizer.Dispose: null until InitModel has run.
+        _angleNet?.Dispose();
     }
 }

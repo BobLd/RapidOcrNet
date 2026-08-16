@@ -274,6 +274,8 @@ public sealed class TextRecognizer : IDisposable
 
     public void Dispose()
     {
-        _crnnNet.Dispose();
+        // Null when InitModel was never reached: the models are loaded separately from
+        // construction, so a caller whose load failed still disposes a half-built instance.
+        _crnnNet?.Dispose();
     }
 }

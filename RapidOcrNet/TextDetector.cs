@@ -604,7 +604,9 @@ public sealed class TextDetector : IDisposable
 
     public void Dispose()
     {
-        _dbNet.Dispose();
+        // See TextRecognizer.Dispose: null until InitModel has run. The Skia fields are
+        // assigned at construction, so they are always safe to dispose.
+        _dbNet?.Dispose();
         _dilatePaint.Dispose();
         _dilateFilter.Dispose();
     }
