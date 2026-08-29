@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <AssemblyName>RapidOcrNet.Benchmarks</AssemblyName>
+    <RootNamespace>RapidOcrNet.Benchmarks</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <!-- Plugin execution provider under test. Requires Microsoft.ML.OnnxRuntime >= 1.24.4
+         (RapidOcrNet pulls 1.29.0). Ships win-x64, win-arm64, linux-x64 and osx-arm64
+         natives only; on any other RID the WebGPU benchmarks will not find a device. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" Version="0.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RapidOcrNet\RapidOcrNet.csproj" />
+  </ItemGroup>
+
+  <!-- Models and images are NOT copied to the output directory: BenchmarkDotNet runs the
+       benchmarks from a generated project whose output folder is a sibling of this one, so
+       content files would not be found there anyway. BenchmarkAssets resolves everything
+       from the repository working tree instead (see BenchmarkAssets.cs). -->
+
+</Project>
