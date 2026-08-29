@@ -140,6 +140,7 @@ public sealed partial class RapidOcr : IDisposable
             options.ReturnWordBox, options.ReturnSingleCharBox,
             options.TextScore, options.ClsThresh,
             options.ClsPreserveAspectRatio,
+            options.RecBatchSize,
             progress,
             cancellationToken);
     }
@@ -343,7 +344,7 @@ public sealed partial class RapidOcr : IDisposable
     private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio, bool doAngle, bool mostAngle,
         bool returnWordBox, bool returnSingleCharBox, float textScore, float clsThresh,
-        bool clsPreserveAspectRatio,
+        bool clsPreserveAspectRatio, int recBatchSize,
         IProgress<(int Completed, int Total)>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -404,7 +405,7 @@ public sealed partial class RapidOcr : IDisposable
             }
 
             // step: crnnNet getTextLines
-            textLines = _textRecognizer.GetTextLines(partImages, progress, cancellationToken);
+            textLines = _textRecognizer.GetTextLines(partImages, recBatchSize, progress, cancellationToken);
         }
         finally
         {

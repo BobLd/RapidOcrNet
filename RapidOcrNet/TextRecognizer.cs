@@ -14,8 +14,14 @@ public sealed class TextRecognizer : IDisposable
     private static readonly float[] MeanValues = [127.5F, 127.5F, 127.5F];
     private static readonly float[] NormValues = [1.0F / 127.5F, 1.0F / 127.5F, 1.0F / 127.5F];
     private const int CrnnDstHeight = 48;
-    //private const int CrnnDefaultWidth = 320; // matches PP-OCR rec_img_shape [3, 48, 320]
-    //private const int RecBatchNum = 6;
+    private const int CrnnDefaultWidth = 320; // matches PP-OCR rec_img_shape [3, 48, 320]
+
+    /// <summary>
+    /// Width/height ratio every batch is padded out to at minimum, i.e. the shape the PP-OCR
+    /// recognizers were exported for. Python's pipeline uses the same floor, so a batch is
+    /// never narrower than the model's nominal 320px input even when every crop in it is short.
+    /// </summary>
+    private const float DefaultWhRatio = CrnnDefaultWidth / (float)CrnnDstHeight;
 
     private InferenceSession _crnnNet;
     private string[] _keys;
@@ -63,7 +69,9 @@ public sealed class TextRecognizer : IDisposable
     }
 
     /// <summary>
-    /// 
+    /// Recognizes every crop one inference at a time. Equivalent to
+    /// <see cref="GetTextLines(SKBitmap[], int, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
+    /// with a batch size of 1.
     /// </summary>
     /// <param name="partImages">Cropped text-line images, in detection order.</param>
     /// <param name="progress">Reported after each crop as (recognised, total). Recognition is the long pole of a page and
@@ -74,13 +82,51 @@ public sealed class TextRecognizer : IDisposable
         IProgress<(int Completed, int Total)>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        // NOTE: Python's pipeline batches crops by aspect ratio and zero-right-pads
-        // each crop to 48 * max(w/h, 320/48) so the recognizer sees its training
-        // distribution. Empirically the bundled PP-OCRv5 latin ONNX model in this
-        // repo does NOT cope well with that right-side padding, it produces wrong
-        // characters and 1-char substitutions on a few inputs. So we keep the legacy
-        // per-image, tight-fit recognizer call (which the model evidently was
-        // re-tuned for) while still recording CTC column indices.
+        return GetTextLines(partImages, 1, progress, cancellationToken);
+    }
+
+    /// <summary>
+    /// Recognizes every crop, optionally several per inference.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With <paramref name="batchSize"/> of 1 each crop is resized to a tight fit (height 48,
+    /// width scaled to preserve its aspect ratio) and run on its own. That is the legacy path
+    /// and is bit-for-bit what this class has always done.
+    /// </para>
+    /// <para>
+    /// Above 1, crops are sorted by aspect ratio, chunked, and each chunk is padded on the
+    /// right to a common width of <c>48 * max(320/48, widest w/h in the chunk)</c> - the
+    /// preprocessing Python's <c>rapidocr</c> applies, and the shape the PP-OCR models were
+    /// exported for. Sorting first keeps crops of similar width together so the padding stays
+    /// small. Each line records a <see cref="TextLine.LineTxtLen"/> covering only its
+    /// un-padded portion, which is what <see cref="CalRecBoxes"/> needs to keep word boxes
+    /// aligned.
+    /// </para>
+    /// <para>
+    /// Batching is not free of consequence: right-padding changes what the network sees, and
+    /// none of the bundled models is indifferent to it - a few percent of lines come back
+    /// different, in both directions. Nor is it reliably faster, since the padding is real
+    /// compute the tight-fit path never does. It is off by default and callers opt in per
+    /// application through <see cref="RapidOcrOptions.RecBatchSize"/>, which documents the
+    /// measurements.
+    /// </para>
+    /// </remarks>
+    /// <param name="partImages">Cropped text-line images, in detection order.</param>
+    /// <param name="batchSize">Crops per inference. Values below 1 are treated as 1.</param>
+    /// <param name="progress">Reported as (recognised, total) - after each crop when unbatched,
+    /// after each chunk when batched.</param>
+    /// <param name="cancellationToken">Observed between crops/chunks and, via
+    /// <see cref="RunOptions.Terminate"/>, within each inference.</param>
+    public TextLine[] GetTextLines(SKBitmap[] partImages, int batchSize,
+        IProgress<(int Completed, int Total)>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchSize > 1 && partImages.Length > 1)
+        {
+            return GetTextLinesBatched(partImages, batchSize, progress, cancellationToken);
+        }
+
         var textLines = new TextLine[partImages.Length];
         for (int i = 0; i < partImages.Length; i++)
         {
@@ -89,6 +135,120 @@ public sealed class TextRecognizer : IDisposable
             progress?.Report((i + 1, partImages.Length));
         }
         return textLines;
+    }
+
+    private TextLine[] GetTextLinesBatched(SKBitmap[] partImages, int batchSize,
+        IProgress<(int Completed, int Total)>? progress,
+        CancellationToken cancellationToken)
+    {
+        var textLines = new TextLine[partImages.Length];
+
+        // Sorting by aspect ratio is what keeps the padding cheap: neighbours in this order
+        // have similar widths, so a chunk's common width stays close to its members' own.
+        var order = new int[partImages.Length];
+        var ratios = new float[partImages.Length];
+        var sortKeys = new float[partImages.Length];
+        for (int i = 0; i < partImages.Length; i++)
+        {
+            order[i] = i;
+            ratios[i] = partImages[i].Width / (float)partImages[i].Height;
+            sortKeys[i] = ratios[i];
+        }
+
+        Array.Sort(sortKeys, order);
+
+        int completed = 0;
+        for (int start = 0; start < order.Length; start += batchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int count = Math.Min(batchSize, order.Length - start);
+
+            float maxWhRatio = DefaultWhRatio;
+            for (int k = 0; k < count; k++)
+            {
+                maxWhRatio = Math.Max(maxWhRatio, ratios[order[start + k]]);
+            }
+
+            RecognizeChunk(partImages, order, ratios, start, count, maxWhRatio,
+                (int)(CrnnDstHeight * maxWhRatio), textLines, cancellationToken);
+
+            completed += count;
+            progress?.Report((completed, partImages.Length));
+        }
+
+        return textLines;
+    }
+
+    private void RecognizeChunk(SKBitmap[] partImages, int[] order, float[] ratios,
+        int start, int count, float maxWhRatio, int batchWidth,
+        TextLine[] textLines, CancellationToken cancellationToken)
+    {
+        var sw = ValueStopwatch.StartNew();
+
+        // Fresh tensor, so every column past a crop's own width is already 0 - the
+        // zero-right-padding the models expect, applied after normalization as in Python.
+        var batch = new DenseTensor<float>([count, 3, CrnnDstHeight, batchWidth]);
+
+        for (int k = 0; k < count; k++)
+        {
+            int index = order[start + k];
+
+            // Python clamps the resized width to the batch width rather than letting a crop
+            // overflow it. Only reachable through rounding here, since maxWhRatio is taken
+            // over this very chunk.
+            int width = Math.Min((int)Math.Ceiling(CrnnDstHeight * ratios[index]), batchWidth);
+
+            using SKBitmap resized = partImages[index].Resize(
+                new SKSizeI(Math.Max(1, width), CrnnDstHeight), OcrUtils.NetworkSampling);
+            OcrUtils.WriteIntoBatch(resized, batch, k, MeanValues, NormValues);
+        }
+
+        IReadOnlyCollection<NamedOnnxValue> inputs =
+        [
+            NamedOnnxValue.CreateFromTensor(_inputName, batch)
+        ];
+
+        try
+        {
+            using var results = OrtRun.Run(_crnnNet, inputs, cancellationToken);
+            Tensor<float> scores = results[0].AsTensor<float>();
+
+            int steps = scores.Dimensions[1];
+            int classes = scores.Dimensions[2];
+
+            // The whole chunk cost one inference, so there is no per-line time to report.
+            // Amortising keeps the sum over a page equal to what recognition actually took,
+            // which is what callers do with TextLine.Time.
+            float perLine = (float)sw.ElapsedMilliseconds / count;
+
+            for (int k = 0; k < count; k++)
+            {
+                int index = order[start + k];
+                TextLine line = ScoreToTextLineFromBatch(scores, k, steps, classes);
+
+                // Only the leading ratios[index]/maxWhRatio of the time axis corresponds to
+                // real pixels, the rest is decoded padding. CalRecBoxes divides the crop's
+                // width by this to get a per-column pixel width.
+                line.LineTxtLen = steps * (ratios[index] / maxWhRatio);
+                line.Time = perLine;
+                textLines[index] = line;
+            }
+
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Debug.WriteLine(ex.Message + ex.StackTrace);
+        }
+
+        // The chunk failed as a unit, so every crop in it comes back empty rather than the
+        // array keeping nulls that would NullReference further down the pipeline.
+        float failedTime = (float)sw.ElapsedMilliseconds / count;
+        for (int k = 0; k < count; k++)
+        {
+            textLines[order[start + k]] = new TextLine { Time = failedTime };
+        }
     }
 
     /// <summary>
@@ -186,52 +346,16 @@ public sealed class TextRecognizer : IDisposable
         };
     }
 
-    /* Not in use. If need to uncomment, Rgba8888 needs to be added
-    private static void WriteImageIntoBatch(SKBitmap src, Tensor<float> batch, int batchIdx, int batchW)
-    {
-        int rows = src.Height;
-        int cols = src.Width;
-        int rowBytes = src.RowBytes;
-        int channels = src.BytesPerPixel;
-        ReadOnlySpan<byte> span = src.GetPixelSpan();
-
-        if (src.Info.ColorType == SKColorType.Gray8)
-        {
-            for (int r = 0; r < rows; r++)
-            {
-                int rowBase = r * rowBytes;
-                for (int c = 0; c < cols; c++)
-                {
-                    float v = (span[rowBase + c] - 127.5F) / 127.5F;
-                    batch[batchIdx, 0, r, c] = v;
-                    batch[batchIdx, 1, r, c] = v;
-                    batch[batchIdx, 2, r, c] = v;
-                }
-                // remaining cols are zero-padded (DenseTensor default value)
-            }
-        }
-        else if (src.Info.ColorType == SKColorType.Bgra8888)
-        {
-            for (int r = 0; r < rows; r++)
-            {
-                int rowBase = r * rowBytes;
-                for (int c = 0; c < cols; c++)
-                {
-                    int pixelBase = rowBase + c * channels;
-                    batch[batchIdx, 0, r, c] = (span[pixelBase + 0] - 127.5F) / 127.5F;
-                    batch[batchIdx, 1, r, c] = (span[pixelBase + 1] - 127.5F) / 127.5F;
-                    batch[batchIdx, 2, r, c] = (span[pixelBase + 2] - 127.5F) / 127.5F;
-                }
-                // remaining cols are zero-padded (already 0 in DenseTensor)
-            }
-        }
-        else
-        {
-            throw new ArgumentException($"Recognizer crop must be '{SKColorType.Bgra8888}' or '{SKColorType.Gray8}'.");
-        }
-    }
-    */
-
+    /// <summary>
+    /// CTC-decodes one slot of a batched score tensor. Identical to <see cref="ScoreToTextLine"/>
+    /// apart from indexing a batch slot rather than assuming slot 0; the caller sets
+    /// <see cref="TextLine.LineTxtLen"/> afterwards, since only it knows how much of the time
+    /// axis was padding.
+    /// </summary>
+    /// <param name="srcData">Score tensor shaped [N, timesteps, classes].</param>
+    /// <param name="batchIdx">Slot to decode.</param>
+    /// <param name="h">Number of CTC timesteps.</param>
+    /// <param name="w">Number of classes.</param>
     private TextLine ScoreToTextLineFromBatch(Tensor<float> srcData, int batchIdx, int h, int w)
     {
         int lastIndex = 0;

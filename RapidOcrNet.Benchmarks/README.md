@@ -57,10 +57,11 @@ Useful filters:
 | Steady-state inference only | `--filter "*OcrPipelineBenchmarks*"` |
 | Session creation only | `--filter "*ModelInitBenchmarks*"` |
 | Detector in isolation | `--filter "*OcrPipelineBenchmarks*" --anyCategories DetectorOnly` |
+| Recognizer batch sweep | `--filter "*RecognizerBatchBenchmarks*"` |
 | One image | `--filter "*img_11*"` |
 | CPU arm only (no GPU on this box) | `--filter "*.Cpu*"` |
 
-## What the two suites mean
+## What the three suites mean
 
 **`OcrPipelineBenchmarks`** — steady-state inference, sessions already created in
 `[GlobalSetup]`. Two categories, each with its own CPU baseline so the `Ratio` column
@@ -72,10 +73,11 @@ compares like with like:
   page, and the part most likely to benefit from GPU offload. Subtract it from
   `FullPipeline` to attribute the remainder to the classifier and recognizer.
 
-The split matters because `TextRecognizer` runs **one crop per inference** rather than
-batching them, so a text-dense page issues one small dispatch per line. Per-dispatch
-overhead is much more visible on a GPU provider than on CPU, and the two categories are
-what separate that effect from the detector's.
+The split matters because `TextRecognizer` runs **one crop per inference** by default, so a
+text-dense page issues one small dispatch per line. Per-dispatch overhead is much more
+visible on a GPU provider than on CPU, and the two categories are what separate that effect
+from the detector's. (`RecognizerBatchBenchmarks` below tests whether batching those crops
+helps. It does not — but that had to be measured rather than assumed.)
 
 The three images are chosen for shape, not content:
 
@@ -96,6 +98,11 @@ once
 
 A batch job over a thousand pages and a CLI that OCRs one screenshot land on opposite sides
 of that inequality.
+
+**`RecognizerBatchBenchmarks`** — sweeps `RapidOcrOptions.RecBatchSize` over the dense page
+under both providers, to price the one optimization the pipeline results pointed at. Each
+`[Params]` value is its own BenchmarkDotNet logical group, so there is no meaningful `Ratio`
+column here — compare the absolute `Mean` down each category.
 
 ## Results on one machine
 
@@ -140,10 +147,59 @@ prediction for your hardware** — re-run before deciding anything.
 - **The detector speeds up uniformly (~3×) while the full pipeline varies (2.6–8×).** The
   dense page gains least in relative terms because it is recognizer-dominated and
   `TextRecognizer` issues one dispatch per crop — 106 small dispatches rather than one large
-  graph.
+  graph. Batching those crops looked like the obvious fix; it was measured and it is not — see
+  below.
 - The CPU arm drifts a little between runs (e.g. 926 ms vs 774 ms for the same detector
   case) — thermal and scheduling variance on a laptop. The effect sizes above are far larger
   than that drift.
+
+### Recognizer batching (`RecBatchSize`) — measured, and it does not pay off
+
+`RecognizerBatchBenchmarks` tests the hypothesis the pipeline results suggested: that the
+dense page gained least from WebGPU because `TextRecognizer` issued one inference per crop,
+and that batching those crops would recover it. **It does not.** Same machine, default job,
+`2108.11480_1.png` (~106 blocks):
+
+| `RecBatchSize` | CPU EP | vs. 1 | WebGPU EP | vs. 1 | Allocated |
+|---:|---:|---:|---:|---:|---:|
+| 1 (default) | 6.765 s | — | 2.619 s | — | 9.46 GB |
+| 4 | 9.592 s | **+42%** | 2.511 s | −4% | 9.63 GB |
+| 8 | 7.776 s | **+15%** | 2.497 s | −5% | 9.72 GB |
+| 16 | 5.920 s | −12% | 2.477 s | −5% | 9.91 GB |
+
+The reason is that batching does not only save dispatches — it *adds work*. Crops are
+right-padded to a common width, and those padding columns are real convolutions the tight-fit
+path never performs. On CPU, where per-dispatch overhead is small next to compute, the added
+work dominates and batching is a net loss at 4 and 8; the CPU curve's non-monotonic shape is
+reproducible across three separate runs, not noise. On WebGPU the two roughly cancel, leaving
+about 5%.
+
+A first attempt blamed the Python-compatible 320px minimum batch width for the wasted compute.
+Removing it changed nothing measurable — on a page of text the lines already exceed a 6.67
+width/height ratio, so that floor almost never binds. The floor was kept.
+
+### Recognizer batching also changes the output
+
+Batching is not output-neutral, which is the more important finding. Comparing `Detect` text
+block-for-block against the unbatched path over 15 test images:
+
+| Model | batch 2 | batch 6 | batch 16 |
+|---|---:|---:|---:|
+| PP-OCRv6 small | 1.8% of blocks differ | 2.4% | 2.4% |
+| PP-OCRv6 tiny | 7.6% | 12.9% | 14.8% |
+| PP-OCRv5 latin | 1.8% | 2.9% | 2.9% |
+
+The differences go both ways — `1 FO0D` → `1 FOOD` and `allsemantic` → `all semantic` are
+batching getting it *right*, while `https://doi.org` → `https:/doi.org` and `2 DENSE RETRIEVAL`
+→ `2DENSE RETRIEVAL` are it getting it wrong. It can also change **how many blocks a page
+returns**: on `TIKA-1552-0_3.png` the unbatched path yields 8 blocks and batching yields 7,
+because the shifted per-character confidences move blocks across the `TextScore` threshold.
+With `TextScore = 0` the same image gives 8 unbatched and 10 batched — batching reads text in
+two crops the tight-fit path returns blank for, and loses confidence on three others.
+
+**Conclusion:** `RecBatchSize` stays at 1 in every preset. It is implemented, tested and
+available for callers who measure a win on their own images and hardware, but it is not a
+free speed-up and should not be enabled by default.
 
 ## Choosing the GPU
 

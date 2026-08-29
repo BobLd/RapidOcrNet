@@ -62,17 +62,35 @@ internal static class OcrUtils
 
     public static Tensor<float> SubtractMeanNormalize(SKBitmap src, float[] meanVals, float[] normVals)
     {
-        const int index = 0; // Corresponds to index in batch (currently a single image per batch)
         const int batchSize = 1;
+        const int expChannels = 3; // Size of meanVals, we ignore alpha channel
 
+        Tensor<float> inputTensor = new DenseTensor<float>([batchSize, expChannels, src.Height, src.Width]);
+        WriteIntoBatch(src, inputTensor, 0, meanVals, normVals);
+        return inputTensor;
+    }
+
+    /// <summary>
+    /// Normalizes <paramref name="src"/> into slot <paramref name="index"/> of an existing
+    /// NCHW tensor. The tensor may be wider than the image, in which case the columns to the
+    /// right of it are left at whatever the tensor already holds - zero for a fresh
+    /// <see cref="DenseTensor{T}"/>, which is the right-padding the PP-OCR recognizers were
+    /// exported for.
+    /// </summary>
+    /// <param name="src">Source image. Must be Bgra8888, Rgba8888 or Gray8.</param>
+    /// <param name="inputTensor">Destination tensor, shaped [N, 3, height, width].</param>
+    /// <param name="index">Batch slot to write into.</param>
+    /// <param name="meanVals">Per-channel mean, in pixel space.</param>
+    /// <param name="normVals">Per-channel inverse std.</param>
+    public static void WriteIntoBatch(SKBitmap src, Tensor<float> inputTensor, int index,
+        float[] meanVals, float[] normVals)
+    {
         int cols = src.Width;
         int rows = src.Height;
         int channels = src.BytesPerPixel;
         int rowBytes = src.RowBytes; // Use actual row stride (may include padding)
 
         const int expChannels = 3; // Size of meanVals, we ignore alpha channel
-
-        Tensor<float> inputTensor = new DenseTensor<float>([batchSize, expChannels, rows, cols]);
 
         ReadOnlySpan<byte> span = src.GetPixelSpan();
 
@@ -130,8 +148,6 @@ internal static class OcrUtils
                 $"This image needs to be '{SKColorType.Bgra8888}', '{SKColorType.Rgba8888}' or " +
                 $"'{SKColorType.Gray8}', but got '{src.Info.ColorType}'.");
         }
-
-        return inputTensor;
     }
 
     /// <summary>

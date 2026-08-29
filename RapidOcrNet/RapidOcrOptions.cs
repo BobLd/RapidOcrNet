@@ -124,6 +124,30 @@ public sealed record RapidOcrOptions
     /// </summary>
     public bool ClsPreserveAspectRatio { get; init; }
 
+    /// <summary>
+    /// Number of text-line crops the recognizer sends per inference. 1 (the default) keeps
+    /// the legacy behaviour: every crop is resized to a tight fit and run on its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Above 1, crops are sorted by aspect ratio, chunked, and right-padded to a common
+    /// width - the preprocessing Python <c>rapidocr</c> uses. Batching trades per-inference
+    /// overhead for wasted compute on the padding, so it is not reliably a win: measured on a
+    /// 106-line page it cost 15-40% at sizes 4 and 8 on the CPU provider and returned 12% at
+    /// 16, and moved the WebGPU provider by at most 5%. Measure on your own images and
+    /// hardware before turning it on.
+    /// </para>
+    /// <para>
+    /// It also is not output-neutral: right-padding changes what the network sees, and no
+    /// bundled model is indifferent to it. A few percent of lines come back different - some
+    /// better, some worse - and because that shifts per-character confidence it can move
+    /// blocks across the <see cref="TextScore"/> threshold and so change how many blocks a
+    /// page returns at all. Every preset therefore leaves this at 1, including
+    /// <see cref="PPOCRv6"/>; raising it is a deliberate per-application decision.
+    /// </para>
+    /// </remarks>
+    public int RecBatchSize { get; init; } = 1;
+
     public float BoxScoreThresh { get; init; }
     public float BoxThresh { get; init; }
     public float UnClipRatio { get; init; }
