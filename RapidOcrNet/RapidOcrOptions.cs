@@ -124,6 +124,27 @@ public sealed record RapidOcrOptions
     /// </summary>
     public bool ClsPreserveAspectRatio { get; init; }
 
+    /// <summary>
+    /// How many text-line crops the recognizer may have in flight at once. 1 (the default)
+    /// recognizes them one after another on the calling thread, as every previous version did.
+    /// -1 lets the thread pool decide. Any other value — 0, or anything below -1 — throws:
+    /// a degree computed from the machine (<c>ProcessorCount - 1</c> on a single core, say)
+    /// is reported here rather than quietly turning into serial or unbounded execution.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The value is 0 or less than -1.
+    /// </exception>
+    public int RecMaxDegreeOfParallelism
+    {
+        get;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfZero(value, nameof(RecMaxDegreeOfParallelism));
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, -1, nameof(RecMaxDegreeOfParallelism));
+            field = value;
+        }
+    } = 1;
+
     public float BoxScoreThresh { get; init; }
     public float BoxThresh { get; init; }
     public float UnClipRatio { get; init; }

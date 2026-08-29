@@ -2,6 +2,7 @@
 // Adapted from RapidAI / RapidOCR
 // https://github.com/RapidAI/RapidOCR/blob/92aec2c1234597fa9c3c270efd2600c83feecd8d/dotnet/RapidOcrOnnxCs/OcrLib/CrnnNet.cs
 
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -63,7 +64,9 @@ public sealed class TextRecognizer : IDisposable
     }
 
     /// <summary>
-    /// 
+    /// Recognizes every crop on the calling thread, one after another. Equivalent to
+    /// <see cref="GetTextLines(SKBitmap[], int, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
+    /// with a degree of parallelism of 1.
     /// </summary>
     /// <param name="partImages">Cropped text-line images, in detection order.</param>
     /// <param name="progress">Reported after each crop as (recognised, total). Recognition is the long pole of a page and
@@ -74,13 +77,90 @@ public sealed class TextRecognizer : IDisposable
         IProgress<(int Completed, int Total)>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        // NOTE: Python's pipeline batches crops by aspect ratio and zero-right-pads
-        // each crop to 48 * max(w/h, 320/48) so the recognizer sees its training
-        // distribution. Empirically the bundled PP-OCRv5 latin ONNX model in this
-        // repo does NOT cope well with that right-side padding, it produces wrong
-        // characters and 1-char substitutions on a few inputs. So we keep the legacy
-        // per-image, tight-fit recognizer call (which the model evidently was
-        // re-tuned for) while still recording CTC column indices.
+        return GetTextLines(partImages, 1, progress, cancellationToken);
+    }
+
+    /// <summary>
+    /// Recognizes every crop, optionally running several inferences concurrently.
+    /// </summary>
+    /// <remarks>
+    /// Concurrency changes timing only, never what a caller sees: results stay in detection
+    /// order, and a crop that fails throws as itself rather than inside the
+    /// <see cref="AggregateException"/> <see cref="Parallel.For(int, int, Action{int})"/> would
+    /// otherwise raise. Where several crops fail, the first one observed is the one that
+    /// surfaces, as on the serial path — which never reaches the crops after the first throw.
+    /// </remarks>
+    /// <param name="partImages">Cropped text-line images, in detection order. Results come back
+    /// in that order however the work is scheduled.</param>
+    /// <param name="maxDegreeOfParallelism">Concurrent inferences. 1 runs everything on the
+    /// calling thread, as this class always has, and is what the overload without this
+    /// parameter does. -1 lets the thread pool decide. Every other value — 0, and anything
+    /// below -1 — throws rather than being coerced, so a miscomputed degree surfaces here
+    /// instead of silently running unbounded.</param>
+    /// <param name="progress">Reported as (recognised, total), once per crop, counting 1..total
+    /// in order. With concurrency the crops behind those numbers do not complete in order, so
+    /// treat the count as a count rather than an index. Reports are serialized to keep them
+    /// ordered, so a handler that blocks holds up the crops queued behind it; and they arrive on
+    /// worker threads, so one that touches UI state directly must marshal —
+    /// <see cref="Progress{T}"/> already does both cheaply.</param>
+    /// <param name="cancellationToken">Observed between crops and, via
+    /// <see cref="RunOptions.Terminate"/>, within each crop's own inference.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxDegreeOfParallelism"/> is 0 or less than -1.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled.
+    /// </exception>
+    public TextLine[] GetTextLines(SKBitmap[] partImages, int maxDegreeOfParallelism,
+        IProgress<(int Completed, int Total)>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(maxDegreeOfParallelism, nameof(maxDegreeOfParallelism));
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxDegreeOfParallelism, -1, nameof(maxDegreeOfParallelism));
+
+        if (maxDegreeOfParallelism != 1 && partImages.Length > 1)
+        {
+            var textLinesP = new TextLine[partImages.Length];
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = maxDegreeOfParallelism,
+                CancellationToken = cancellationToken
+            };
+
+            int completed = 0;
+            object progressLock = new();
+
+            try
+            {
+                // Each iteration writes its own slot, so the results need no synchronization and stay
+                // in detection order no matter which thread finishes when.
+                Parallel.For(0, partImages.Length, parallelOptions, i =>
+                {
+                    textLinesP[i] = GetTextLine(partImages[i], cancellationToken);
+
+                    if (progress is not null)
+                    {
+                        lock (progressLock)
+                        {
+                            progress.Report((++completed, partImages.Length));
+                        }
+                    }
+                });
+            }
+            catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
+            {
+                // A degree of parallelism is a performance knob, so it must not change what a
+                // caller has to catch. Serially the first failing crop throws as itself; here
+                // Parallel.For would box it in an AggregateException, so unbox it and rethrow
+                // with its original stack intact. Later failures are dropped, which is what the
+                // serial path does too - it never reaches the crops after the first throw.
+                ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw();
+                throw; // Unreachable: Throw() above does not return.
+            }
+
+            return textLinesP;
+        }
+
         var textLines = new TextLine[partImages.Length];
         for (int i = 0; i < partImages.Length; i++)
         {
@@ -183,92 +263,6 @@ public sealed class TextRecognizer : IDisposable
             CharCols = cols.ToArray(),
             ColCount = h,
             LineTxtLen = h
-        };
-    }
-
-    /* Not in use. If need to uncomment, Rgba8888 needs to be added
-    private static void WriteImageIntoBatch(SKBitmap src, Tensor<float> batch, int batchIdx, int batchW)
-    {
-        int rows = src.Height;
-        int cols = src.Width;
-        int rowBytes = src.RowBytes;
-        int channels = src.BytesPerPixel;
-        ReadOnlySpan<byte> span = src.GetPixelSpan();
-
-        if (src.Info.ColorType == SKColorType.Gray8)
-        {
-            for (int r = 0; r < rows; r++)
-            {
-                int rowBase = r * rowBytes;
-                for (int c = 0; c < cols; c++)
-                {
-                    float v = (span[rowBase + c] - 127.5F) / 127.5F;
-                    batch[batchIdx, 0, r, c] = v;
-                    batch[batchIdx, 1, r, c] = v;
-                    batch[batchIdx, 2, r, c] = v;
-                }
-                // remaining cols are zero-padded (DenseTensor default value)
-            }
-        }
-        else if (src.Info.ColorType == SKColorType.Bgra8888)
-        {
-            for (int r = 0; r < rows; r++)
-            {
-                int rowBase = r * rowBytes;
-                for (int c = 0; c < cols; c++)
-                {
-                    int pixelBase = rowBase + c * channels;
-                    batch[batchIdx, 0, r, c] = (span[pixelBase + 0] - 127.5F) / 127.5F;
-                    batch[batchIdx, 1, r, c] = (span[pixelBase + 1] - 127.5F) / 127.5F;
-                    batch[batchIdx, 2, r, c] = (span[pixelBase + 2] - 127.5F) / 127.5F;
-                }
-                // remaining cols are zero-padded (already 0 in DenseTensor)
-            }
-        }
-        else
-        {
-            throw new ArgumentException($"Recognizer crop must be '{SKColorType.Bgra8888}' or '{SKColorType.Gray8}'.");
-        }
-    }
-    */
-
-    private TextLine ScoreToTextLineFromBatch(Tensor<float> srcData, int batchIdx, int h, int w)
-    {
-        int lastIndex = 0;
-        var scores = new List<float>();
-        var chars = new List<string>();
-        var cols = new List<int>();
-
-        for (int i = 0; i < h; i++)
-        {
-            int maxIndex = 0;
-            float maxValue = -1000F;
-            for (int j = 0; j < w; j++)
-            {
-                float v = srcData[batchIdx, i, j];
-                if (v > maxValue)
-                {
-                    maxIndex = j;
-                    maxValue = v;
-                }
-            }
-
-            if (maxIndex > 0 && maxIndex < _keys.Length && !(i > 0 && maxIndex == lastIndex))
-            {
-                scores.Add(maxValue);
-                chars.Add(_keys[maxIndex]);
-                cols.Add(i);
-            }
-
-            lastIndex = maxIndex;
-        }
-
-        return new TextLine
-        {
-            Chars = chars.ToArray(),
-            CharScores = scores.ToArray(),
-            CharCols = cols.ToArray(),
-            ColCount = h
         };
     }
 

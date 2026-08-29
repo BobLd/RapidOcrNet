@@ -57,10 +57,11 @@ Useful filters:
 | Steady-state inference only | `--filter "*OcrPipelineBenchmarks*"` |
 | Session creation only | `--filter "*ModelInitBenchmarks*"` |
 | Detector in isolation | `--filter "*OcrPipelineBenchmarks*" --anyCategories DetectorOnly` |
+| Recognizer parallelism sweep | `--filter "*RecognizerParallelBenchmarks*"` |
 | One image | `--filter "*img_11*"` |
 | CPU arm only (no GPU on this box) | `--filter "*.Cpu*"` |
 
-## What the two suites mean
+## What the three suites mean
 
 **`OcrPipelineBenchmarks`** — steady-state inference, sessions already created in
 `[GlobalSetup]`. Two categories, each with its own CPU baseline so the `Ratio` column
@@ -96,6 +97,11 @@ once
 
 A batch job over a thousand pages and a CLI that OCRs one screenshot land on opposite sides
 of that inequality.
+
+**`RecognizerParallelBenchmarks`** — sweeps `RapidOcrOptions.RecMaxDegreeOfParallelism` over
+the dense page under both providers. Each `[Params]` value is its own BenchmarkDotNet logical
+group, so there is no meaningful `Ratio` column — compare the absolute `Mean` down each
+category.
 
 ## Results on one machine
 
@@ -135,15 +141,59 @@ prediction for your hardware** — re-run before deciding anything.
 - **The discrete RTX 4070 is no faster than the integrated Intel UHD** — every pair is
   within noise. So this workload is not GPU-compute-bound; what is left is per-dispatch
   overhead plus the CPU-side work still inside the measurement (SkiaSharp crops, tensor
-  fills, DB post-processing). Buying a bigger GPU would not help; batching the recognizer
-  might.
+  fills, DB post-processing). Buying a bigger GPU would not help; overlapping the recognizer
+  calls does — see below.
 - **The detector speeds up uniformly (~3×) while the full pipeline varies (2.6–8×).** The
   dense page gains least in relative terms because it is recognizer-dominated and
   `TextRecognizer` issues one dispatch per crop — 106 small dispatches rather than one large
-  graph.
+  graph. `RecMaxDegreeOfParallelism` closes most of that gap; see the next section.
 - The CPU arm drifts a little between runs (e.g. 926 ms vs 774 ms for the same detector
   case) — thermal and scheduling variance on a laptop. The effect sizes above are far larger
   than that drift.
+
+### Recognizer parallelism (`RecMaxDegreeOfParallelism`)
+
+`RecognizerParallelBenchmarks` addresses the weakest result above: the dense page, whose
+recognizer issues one inference per crop and so leaves the execution provider idle through
+each crop's Skia resize, normalization and CTC decode. Running those inferences concurrently
+overlaps that work. Same machine, default job, `2108.11480_1.png` (~106 blocks):
+
+| `RecMaxDegreeOfParallelism` | CPU EP | vs. 1 | WebGPU EP | vs. 1 |
+|---:|---:|---:|---:|---:|
+| 1 (default) | 6.202 s | — | 2.573 s | — |
+| 2 | 4.847 s | 1.28× | 1.747 s | 1.47× |
+| 4 | 4.132 s | 1.50× | 1.369 s | 1.88× |
+| 8 | 3.737 s | 1.66× | **1.318 s** | **1.95×** |
+| 16 | **3.703 s** | **1.67×** | 1.413 s | 1.82× |
+
+Allocations are **identical at every value** (9.46 GB), because nothing about the work
+changes — only when it runs.
+
+Compounding with the provider choice, the dense page goes from 6.202 s (CPU, serial) to
+1.318 s (WebGPU, 8-way) — **4.7× end to end**, against the 2.6× WebGPU managed on its own.
+
+Both curves flatten and then turn: CPU gains nothing past 8, and WebGPU is worse at 16 than
+at 8. ONNX Runtime already spreads each inference across its own `IntraOpNumThreads` pool and
+concurrent runs share it, so past a point this only moves the queueing. **8 is the sweet spot
+on this machine**; treat that as a starting point to measure from, not a constant.
+
+The gain scales with crop count, so it is a dense-page optimization. An image with three text
+lines has almost nothing to overlap and will show close to nothing.
+
+### Parallelism does not change the output
+
+Unlike batching crops into a single padded inference, concurrency leaves the model input
+untouched: each crop is resized, normalized, run and decoded exactly as on the serial path.
+Verified across 32 test images × 5 parallelism values × 3 model sets (v6 small, v6 tiny, v5
+latin) — **480 comparisons, all byte-identical**, comparing text, per-character scores *and*
+the word-box polygons derived from CTC column indices.
+
+That is what makes this preferable to batching, which changes the recognizer input and with
+it a few percent of the recognized lines.
+
+`RecMaxDegreeOfParallelism` still defaults to 1 in every preset, because it spends threads
+the caller has not offered — a server already running one OCR per request wants that
+concurrency at its own level, not multiplied underneath it.
 
 ## Choosing the GPU
 

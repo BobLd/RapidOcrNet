@@ -60,6 +60,17 @@ public sealed class TextLine
     /// </summary>
     public float LineTxtLen { get; internal set; }
 
+    /// <summary>
+    /// Wall-clock milliseconds spent recognizing this crop.
+    /// </summary>
+    /// <remarks>
+    /// Wall clock, not work done: with
+    /// <see cref="RapidOcrOptions.RecMaxDegreeOfParallelism"/> above 1 this includes whatever
+    /// the crop spent sharing the intra-op thread pool with the others in flight, so it grows
+    /// roughly with the degree of parallelism even as the page as a whole gets faster. Summing
+    /// it across crops therefore overstates the page; only <see cref="OcrResult.DetectTime"/>
+    /// stays comparable between the serial and parallel paths.
+    /// </remarks>
     public float Time { get; internal set; }
 
     public override string ToString()
@@ -98,7 +109,18 @@ public sealed class TextBlock : ITextBox
     public required string[]? Chars { get; init; }
     public required float[]? CharScores { get; init; }
     public WordBox[]? WordResults { get; init; }
+    /// <summary>
+    /// Wall-clock milliseconds spent recognizing this block's text line. Inflated by
+    /// concurrency — see <see cref="TextLine.Time"/>, which it is taken from.
+    /// </summary>
     public float CrnnTime { get; init; }
+
+    /// <summary>
+    /// <see cref="AngleTime"/> plus <see cref="CrnnTime"/>, so it carries the same caveat:
+    /// under <see cref="RapidOcrOptions.RecMaxDegreeOfParallelism"/> above 1 these are
+    /// overlapping wall-clock spans, and adding them up across blocks does not give the time
+    /// the page took.
+    /// </summary>
     public float BlockTime { get; init; }
 
     public override string ToString()
