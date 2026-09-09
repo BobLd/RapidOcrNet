@@ -62,8 +62,7 @@ internal static class OcrUtils
 
     public static Tensor<float> SubtractMeanNormalize(SKBitmap src, float[] meanVals, float[] normVals)
     {
-        const int index = 0; // Corresponds to index in batch (currently a single image per batch)
-        const int batchSize = 1;
+        const int batchSize = 1; // Currently a single image per batch, at index 0
 
         int cols = src.Width;
         int rows = src.Height;
@@ -72,7 +71,10 @@ internal static class OcrUtils
 
         const int expChannels = 3; // Size of meanVals, we ignore alpha channel
 
-        Tensor<float> inputTensor = new DenseTensor<float>([batchSize, expChannels, rows, cols]);
+        var inputTensor = new DenseTensor<float>([batchSize, expChannels, rows, cols]);
+
+        Span<float> dst = inputTensor.Buffer.Span;
+        int channelStride = rows * cols;
 
         ReadOnlySpan<byte> span = src.GetPixelSpan();
 
@@ -83,12 +85,14 @@ internal static class OcrUtils
             for (int r = 0; r < rows; ++r)
             {
                 int rowBase = r * rowBytes;
+                int pixelRowBase = r * cols;
                 for (int c = 0; c < cols; ++c)
                 {
                     byte value = span[rowBase + c];
-                    inputTensor[index, 0, r, c] = (value - mean0) * norm0;
-                    inputTensor[index, 1, r, c] = (value - mean1) * norm1;
-                    inputTensor[index, 2, r, c] = (value - mean2) * norm2;
+                    int p = pixelRowBase + c;
+                    dst[p] = (value - mean0) * norm0;
+                    dst[channelStride + p] = (value - mean1) * norm1;
+                    dst[2 * channelStride + p] = (value - mean2) * norm2;
                 }
             }
         }
@@ -97,13 +101,15 @@ internal static class OcrUtils
             for (int r = 0; r < rows; ++r)
             {
                 int rowBase = r * rowBytes;
+                int pixelRowBase = r * cols;
                 for (int c = 0; c < cols; ++c)
                 {
                     int pixelBase = rowBase + c * channels;
+                    int p = pixelRowBase + c;
                     for (int ch = 0; ch < expChannels; ++ch)
                     {
                         byte value = span[pixelBase + ch];
-                        inputTensor[index, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
+                        dst[ch * channelStride + p] = (value - meanVals[ch]) * normVals[ch];
                     }
                 }
             }
@@ -113,13 +119,15 @@ internal static class OcrUtils
             for (int r = 0; r < rows; ++r)
             {
                 int rowBase = r * rowBytes;
+                int pixelRowBase = r * cols;
                 for (int c = 0; c < cols; ++c)
                 {
                     int pixelBase = rowBase + c * channels;
+                    int p = pixelRowBase + c;
                     for (int ch = 0; ch < expChannels; ++ch)
                     {
                         byte value = span[pixelBase + (expChannels - 1 - ch)];
-                        inputTensor[index, ch, r, c] = (value - meanVals[ch]) * normVals[ch];
+                        dst[ch * channelStride + p] = (value - meanVals[ch]) * normVals[ch];
                     }
                 }
             }
