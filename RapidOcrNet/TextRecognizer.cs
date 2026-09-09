@@ -226,6 +226,8 @@ public sealed class TextRecognizer : IDisposable
         int h = dimensions[1];
         int w = dimensions[2];
 
+        ReadOnlySpan<float> span = srcData is DenseTensor<float> dense ? dense.Buffer.Span : srcData.ToArray();
+
         int lastIndex = 0;
         var scores = new List<float>();
         var chars = new List<string>();
@@ -234,11 +236,12 @@ public sealed class TextRecognizer : IDisposable
         for (int i = 0; i < h; i++)
         {
             int maxIndex = 0;
-            float maxValue = -1000F;
+            float maxValue = float.NegativeInfinity;
+            int offset = i * w;
 
             for (int j = 0; j < w; j++)
             {
-                float v = srcData[0, i, j];
+                float v = span[offset + j];
                 if (v > maxValue)
                 {
                     maxIndex = j;
