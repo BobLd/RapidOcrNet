@@ -267,6 +267,81 @@ ocr.InitModels(
 
 The recognizer's character set is defined by the `*_dict.txt` file — it **must** match the `*_rec_*.onnx` you load, otherwise the output will be gibberish.
 
+### Loading models from a stream
+If your models don't exist as a file the process can open — embedded resources, zip entries, blobs fetched over the network — hand `InitModels` streams instead of paths:
+```csharp
+using var ocr = new RapidOcr();
+
+// e.g. embedded resources
+using var det  = Assembly.GetManifestResourceStream("MyApp.Resources.ch_PP-OCRv5_mobile_det.onnx")!;
+using var cls  = Assembly.GetManifestResourceStream("MyApp.Resources.ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")!;
+using var rec  = Assembly.GetManifestResourceStream("MyApp.Resources.latin_PP-OCRv5_rec_mobile_infer.onnx")!;
+using var keys = Assembly.GetManifestResourceStream("MyApp.Resources.ppocrv5_latin_dict.txt")!;
+
+ocr.InitModels(det, cls, rec, keys);
+
+// Or, with custom session options:
+// ocr.InitModels(det, cls, rec, keys, sessionOptions);
+```
+
+Each stream is read to its end and **left open** — passing one in does not hand over ownership of it, so a seekable stream can be rewound and loaded a second time. Nothing is written to disk on the way: the bytes go straight into the ONNX session.
+
+Streams default to the PP-OCRv5 detector normalization, exactly as paths do. A **PP-OCRv6** detector needs the other one and cannot work that out from the bytes, so wrap the streams in a `RapidOcrModelStreamSet` and state it — the values are on the preset you're replacing:
+```csharp
+var v6 = RapidOcrModelSet.PPOCRv6Small;   // used here for its normalization only
+
+ocr.InitModels(new RapidOcrModelStreamSet
+{
+    DetModelStream = detStream,
+    ClsModelStream = clsStream,
+    RecModelStream = recStream,
+    KeysStream     = keysStream,
+    DetMean        = v6.DetMean,
+    DetStd         = v6.DetStd,
+});
+```
+
+### Loading models from bytes
+When the models are already bytes — decrypted from an encrypted resource, decompressed from a blob, or read by something else on your behalf — hand the arrays over directly. Nothing is copied on the way in, so this is the cheapest of the three routes:
+```csharp
+byte[] det  = Decrypt(Resources.DetModel);
+byte[] cls  = Decrypt(Resources.ClsModel);
+byte[] rec  = Decrypt(Resources.RecModel);
+byte[] keys = Decrypt(Resources.Keys);
+
+ocr.InitModels(det, cls, rec, keys);
+
+// Or, with custom session options:
+// ocr.InitModels(det, cls, rec, keys, sessionOptions);
+```
+
+The runtime parses each model and takes its own copy while the session is built, so the plaintext is yours again the moment `InitModels` returns — **it can be wiped straight away**, rather than leaving decrypted weights on the heap for the life of the process:
+```csharp
+ocr.InitModels(det, cls, rec, keys);
+
+CryptographicOperations.ZeroMemory(det);
+CryptographicOperations.ZeroMemory(cls);
+CryptographicOperations.ZeroMemory(rec);
+CryptographicOperations.ZeroMemory(keys);
+```
+
+A PP-OCRv6 detector needs its own normalization here too, so pass a `RapidOcrModelByteSet` instead:
+```csharp
+var v6 = RapidOcrModelSet.PPOCRv6Small;   // used here for its normalization only
+
+ocr.InitModels(new RapidOcrModelByteSet
+{
+    DetModelBytes = detBytes,
+    ClsModelBytes = clsBytes,
+    RecModelBytes = recBytes,
+    KeysBytes     = keysBytes,
+    DetMean       = v6.DetMean,
+    DetStd        = v6.DetStd,
+});
+```
+
+> **Which route to pick.** If the models are on disk, use the path overloads: ONNX Runtime opens the file itself, so nothing at all lands on the managed heap. Streams and bytes are for models that never become a file, and bytes avoid the one buffer a stream has to be read into (~4 ms and one array for a 20 MB model; ~16 ms and 138 MB for a 138 MB one).
+
 ## Notice
 Based on source code originally developed in the RapidOCR project (Apache-2.0 license).
 - https://github.com/RapidAI/RapidOCR

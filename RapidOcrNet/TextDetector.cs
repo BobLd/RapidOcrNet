@@ -53,12 +53,84 @@ public sealed class TextDetector : IDisposable
     }
 
     /// <summary>
+    /// Initialize the detector from an ONNX model already in memory, with the default PP-OCRv5
+    /// (ImageNet) normalization.
+    /// </summary>
+    /// <remarks>
+    /// The runtime parses and copies the model as the session is built, so the array is the caller's
+    /// again the moment this returns: it can be reused, pooled, or wiped where the model was
+    /// decrypted.
+    /// </remarks>
+    public void InitModel(byte[] model, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        _dbNet = new InferenceSession(model, op);
+        _inputName = _dbNet.InputMetadata.Keys.First();
+    }
+
+    /// <inheritdoc cref="InitModel(byte[], SessionOptions)"/>
+    /// <remarks>The stream is read to its end and left open.</remarks>
+    public void InitModel(Stream modelStream, SessionOptions op)
+    {
+        InitModel(ModelStreams.ReadAllBytes(modelStream, nameof(modelStream)), op);
+    }
+
+    /// <summary>
     /// Initialize the detector with explicit pixel-space normalization. <paramref name="mean"/>
     /// and <paramref name="std"/> are in pixel space (e.g. 0.5 maps to 127.5). The std is
     /// inverted internally so the existing <c>(pixel - mean) * (1/std)</c> normalization math
     /// is preserved. Use this for PP-OCRv6 detectors, which expect mean/std (127.5, 127.5).
     /// </summary>
     public void InitModel(string path, float[] mean, float[] std, SessionOptions op)
+    {
+        ValidateNormalization(mean, std);
+        InitModel(path, op);
+        ApplyNormalization(mean, std);
+    }
+
+    /// <inheritdoc cref="InitModel(string, float[], float[], SessionOptions)"/>
+    public void InitModel(byte[] model, float[] mean, float[] std, SessionOptions op)
+    {
+        ValidateNormalization(mean, std);
+        InitModel(model, op);
+        ApplyNormalization(mean, std);
+    }
+
+    /// <inheritdoc cref="InitModel(string, float[], float[], SessionOptions)"/>
+    /// <remarks>The stream is read to its end and left open.</remarks>
+    public void InitModel(Stream modelStream, float[] mean, float[] std, SessionOptions op)
+    {
+        ValidateNormalization(mean, std);
+        InitModel(modelStream, op);
+        ApplyNormalization(mean, std);
+    }
+
+    public void InitModel(string path, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(path, sessionOptions);
+    }
+
+    /// <inheritdoc cref="InitModel(byte[], SessionOptions)"/>
+    public void InitModel(byte[] model, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(model, sessionOptions);
+    }
+
+    /// <inheritdoc cref="InitModel(Stream, SessionOptions)"/>
+    public void InitModel(Stream modelStream, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(modelStream, sessionOptions);
+    }
+
+    /// <summary>
+    /// Validates normalization arguments up front, before a session is built from them and before
+    /// a model stream is consumed.
+    /// </summary>
+    private static void ValidateNormalization(float[] mean, float[] std)
     {
         ArgumentNullException.ThrowIfNull(mean);
         ArgumentNullException.ThrowIfNull(std);
@@ -67,27 +139,26 @@ public sealed class TextDetector : IDisposable
             throw new ArgumentException("Detector mean and std must each have exactly 3 channel values.");
         }
 
-        InitModel(path, op);
-
-        _meanValues = mean;
-        var norm = new float[3];
         for (int c = 0; c < 3; c++)
         {
             if (std[c] == 0F)
             {
                 throw new ArgumentException("Detector std values must be non-zero.", nameof(std));
             }
+        }
+    }
 
+    private void ApplyNormalization(float[] mean, float[] std)
+    {
+        _meanValues = mean;
+
+        var norm = new float[3];
+        for (int c = 0; c < 3; c++)
+        {
             norm[c] = 1.0F / std[c];
         }
 
         _normValues = norm;
-    }
-
-    public void InitModel(string path, int numThread)
-    {
-        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
-        InitModel(path, sessionOptions);
     }
 
     /// <param name="cancellationToken">

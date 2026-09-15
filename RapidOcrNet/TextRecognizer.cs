@@ -39,15 +39,78 @@ public sealed class TextRecognizer : IDisposable
         _keys = InitKeys(keysPath);
     }
 
+    /// <summary>
+    /// Initialize the recognizer from an ONNX model and a character dictionary already in memory.
+    /// </summary>
+    /// <remarks>
+    /// The runtime parses and copies the model as the session is built, so the model array is the
+    /// caller's again the moment this returns.
+    /// </remarks>
+    public void InitModel(byte[] model, byte[] keys, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        SetModel(model, op);
+        _keys = InitKeys(keys);
+    }
+
+    /// <inheritdoc cref="InitModel(byte[], byte[], SessionOptions)"/>
+    /// <remarks>Both streams are read to their ends and left open.</remarks>
+    public void InitModel(Stream modelStream, Stream keysStream, SessionOptions op)
+    {
+        ModelStreams.EnsureReadable(keysStream, nameof(keysStream));
+
+        SetModel(ModelStreams.ReadAllBytes(modelStream, nameof(modelStream)), op);
+        _keys = InitKeys(keysStream);
+    }
+
+    private void SetModel(byte[] model, SessionOptions op)
+    {
+        _crnnNet = new InferenceSession(model, op);
+        _inputName = _crnnNet.InputMetadata.Keys.First();
+    }
+
     public void InitModel(string path, string keysPath, int numThread)
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
         InitModel(path, keysPath, sessionOptions);
     }
 
+    /// <inheritdoc cref="InitModel(byte[], byte[], SessionOptions)"/>
+    public void InitModel(byte[] model, byte[] keys, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(model, keys, sessionOptions);
+    }
+
+    /// <inheritdoc cref="InitModel(Stream, Stream, SessionOptions)"/>
+    public void InitModel(Stream modelStream, Stream keysStream, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(modelStream, keysStream, sessionOptions);
+    }
+
+    private static string[] InitKeys(byte[] keys)
+    {
+        // A MemoryStream over an existing array wraps it rather than copying it, so this is the
+        // same read the stream overload does without a second buffer in between.
+        using var stream = new MemoryStream(keys, writable: false);
+        return InitKeys(stream);
+    }
+
     private static string[] InitKeys(string path)
     {
-        using (var sr = new StreamReader(path, Encoding.UTF8))
+        using var fs = File.OpenRead(path);
+        return InitKeys(fs);
+    }
+
+    private static string[] InitKeys(Stream stream)
+    {
+        // leaveOpen: the reader borrows the caller's stream rather than owning it, so loading from
+        // a stream does not close a stream the caller may still want to use.
+        using (var sr = new StreamReader(stream, Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true))
         {
             List<string> keys = ["#"];
 
