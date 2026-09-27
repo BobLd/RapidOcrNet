@@ -164,6 +164,36 @@ ocr.InitModels(sessionOptions);
 
 Cancellation is independent of all of this. The terminate flag is read by whichever thread is walking the graph — under the default sequential execution mode, the calling thread itself — so `InitModels(numThread: 1)` cancels exactly like a fully parallel session. On a non-CPU execution provider the flag stops the graph walk rather than recalling work already dispatched to the device queue, so cancellation is prompt but not instant.
 
+### Different session options per model
+A single `SessionOptions` is applied to all three models. To configure them separately — for example to put the detector and recognizer on an accelerator but keep the small angle classifier on CPU — pass a `RapidOcrSessionOptions` instead:
+```csharp
+using var ocr = new RapidOcr();
+
+// Apple Silicon: CoreML for the two large graphs, plain CPU for the classifier (see issue #51).
+using var detOptions = RapidOcr.GetDefaultSessionOptions();
+detOptions.AppendExecutionProvider_CoreML(
+    CoreMLFlags.COREML_FLAG_ENABLE_ON_SUBGRAPH |
+    CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM |
+    CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU);
+
+using var recOptions = RapidOcr.GetDefaultSessionOptions();
+recOptions.AppendExecutionProvider_CoreML(
+    CoreMLFlags.COREML_FLAG_ENABLE_ON_SUBGRAPH |
+    CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU);
+
+ocr.InitModels(RapidOcrModelSet.PPOCRv5Latin, new RapidOcrSessionOptions
+{
+    Det = detOptions,
+    Rec = recOptions,
+    // Cls left null => GetDefaultSessionOptions(NumThread), i.e. CPU
+});
+```
+
+- Every slot is optional. A `null` slot gets `RapidOcr.GetDefaultSessionOptions(NumThread)`, which RapidOcrNet creates and disposes itself.
+- Options you pass in remain yours: dispose them once `InitModels` has returned. The same instance can be used for more than one slot.
+- There are matching overloads for the default models (`InitModels(RapidOcrSessionOptions)`) and for custom paths (`InitModels(detPath, clsPath, recPath, keysPath, RapidOcrSessionOptions)`).
+- `RapidOcrSessionOptions` is load-time configuration. It is unrelated to `RapidOcrOptions`, which you pass to each `Detect` call.
+
 ## Choosing models (PP-OCRv5 vs PP-OCRv6)
 `RapidOcrModelSet` bundles a complete set of models (detector + classifier + recognizer + dictionary) plus the detector's normalization, so you can switch model families with a single argument. Pass a preset to `InitModels`:
 
@@ -218,7 +248,7 @@ OcrResult result = ocr.Detect("image.png", RapidOcrOptions.PPOCRv6);
 
 > ⚠️ **Do not use `RapidOcrOptions.Default` with v6.** `Default`'s 1024 long-side cap and 50&nbsp;px white border are tuned for the bundled v5 model; they starve the v6 detector of resolution and produce missed or garbled boxes on small images. `PPOCRv6` is a named alias of `PythonCompat` (the Python-`rapidocr`-faithful preprocessing). v6's strength is **multilingual** coverage (Latin + CJK and more in one model) — on Latin-only inputs it performs similarly to the Latin-specialised v5 model.
 
-`InitModels(RapidOcrModelSet, …)` also has an overload taking a custom `SessionOptions` for GPU / threading, exactly like the other `InitModels` overloads.
+`InitModels(RapidOcrModelSet, …)` also has overloads taking a custom `SessionOptions` for GPU / threading, or a `RapidOcrSessionOptions` for [per-model options](#different-session-options-per-model), exactly like the other `InitModels` overloads.
 
 ## Using custom models / other languages
 Pass explicit paths if you've downloaded different ONNX files (e.g. Chinese, Japanese, or a heavier `_server_` recognizer):
