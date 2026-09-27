@@ -9,6 +9,13 @@
     <IsPackable>false</IsPackable>
     <AssemblyName>RapidOcrNet.Benchmarks</AssemblyName>
     <RootNamespace>RapidOcrNet.Benchmarks</RootNamespace>
+
+    <!-- Which RapidOcrNet build the benchmarks run against. "Local" (the default) builds
+         from this checkout via ProjectReference; any other value is passed straight through
+         as the version of the published NuGet package - see NuGetPackageConfig, which drives
+         this per BenchmarkDotNet job via /p:RapidOcrNetVersion=<value>, and
+         PackageVersionBenchmarks, which is what actually uses that config. -->
+    <RapidOcrNetVersion Condition="'$(RapidOcrNetVersion)' == ''">Local</RapidOcrNetVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,8 +26,12 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" Version="0.3.0" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(RapidOcrNetVersion)' == 'Local'">
     <ProjectReference Include="..\RapidOcrNet\RapidOcrNet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RapidOcrNetVersion)' != 'Local'">
+    <PackageReference Include="RapidOcrNet" Version="$(RapidOcrNetVersion)" />
   </ItemGroup>
 
   <!-- Models and images are NOT copied to the output directory: BenchmarkDotNet runs the
