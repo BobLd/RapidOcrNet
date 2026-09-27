@@ -57,9 +57,43 @@ public sealed partial class RapidOcr : IDisposable
     /// </summary>
     public void InitModels(string detPath, string clsPath, string recPath, string keysPath, SessionOptions op)
     {
-        _textDetector.InitModel(detPath, op);
-        _textClassifier.InitModel(clsPath, op);
-        _textRecognizer.InitModel(recPath, keysPath, op);
+        InitModels(detPath, clsPath, recPath, keysPath, SameForAll(op));
+    }
+
+    /// <summary>
+    /// Initialize using default models (latin) and per-model options.
+    /// </summary>
+    public void InitModels(RapidOcrSessionOptions sessionOptions)
+    {
+        string detPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultDetModelPath);
+        string clsPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultClsModelPath);
+        string recPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultRecModelPath);
+        string keysPath = Path.Combine(ModelsFolderName, ModelsVersion, DefaultKeysFilePath);
+
+        InitModels(detPath, clsPath, recPath, keysPath, sessionOptions);
+    }
+
+    /// <summary>
+    /// Initialize using custom models and per-model options.
+    /// </summary>
+    public void InitModels(string detPath, string clsPath, string recPath, string keysPath, RapidOcrSessionOptions sessionOptions)
+    {
+        ArgumentNullException.ThrowIfNull(sessionOptions);
+
+        using (var det = ResolvedSessionOptions.For(sessionOptions.Det, sessionOptions.NumThread))
+        {
+            _textDetector.InitModel(detPath, det.Options);
+        }
+
+        using (var cls = ResolvedSessionOptions.For(sessionOptions.Cls, sessionOptions.NumThread))
+        {
+            _textClassifier.InitModel(clsPath, cls.Options);
+        }
+
+        using (var rec = ResolvedSessionOptions.For(sessionOptions.Rec, sessionOptions.NumThread))
+        {
+            _textRecognizer.InitModel(recPath, keysPath, rec.Options);
+        }
     }
 
     /// <summary>
@@ -79,11 +113,73 @@ public sealed partial class RapidOcr : IDisposable
     /// </summary>
     public void InitModels(RapidOcrModelSet models, SessionOptions op)
     {
-        ArgumentNullException.ThrowIfNull(models);
+        InitModels(models, SameForAll(op));
+    }
 
-        _textDetector.InitModel(models.DetModelPath, models.DetMean, models.DetStd, op);
-        _textClassifier.InitModel(models.ClsModelPath, op);
-        _textRecognizer.InitModel(models.RecModelPath, models.KeysPath, op);
+    /// <summary>
+    /// Initialize using a model set (e.g. <see cref="RapidOcrModelSet.PPOCRv5Latin"/> or
+    /// <see cref="RapidOcrModelSet.PPOCRv6Small"/>) and per-model options, so each model can
+    /// use its own execution provider (see <see cref="RapidOcrSessionOptions"/>).
+    /// </summary>
+    public void InitModels(RapidOcrModelSet models, RapidOcrSessionOptions sessionOptions)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        ArgumentNullException.ThrowIfNull(sessionOptions);
+
+        using (var det = ResolvedSessionOptions.For(sessionOptions.Det, sessionOptions.NumThread))
+        {
+            _textDetector.InitModel(models.DetModelPath, models.DetMean, models.DetStd, det.Options);
+        }
+
+        using (var cls = ResolvedSessionOptions.For(sessionOptions.Cls, sessionOptions.NumThread))
+        {
+            _textClassifier.InitModel(models.ClsModelPath, cls.Options);
+        }
+
+        using (var rec = ResolvedSessionOptions.For(sessionOptions.Rec, sessionOptions.NumThread))
+        {
+            _textRecognizer.InitModel(models.RecModelPath, models.KeysPath, rec.Options);
+        }
+    }
+
+    private static RapidOcrSessionOptions SameForAll(SessionOptions op)
+    {
+        // Checked here rather than left to the per-model fallback: a null op was never "use the
+        // defaults" on these overloads, and silently turning it into that would hide a caller bug.
+        ArgumentNullException.ThrowIfNull(op);
+        return new RapidOcrSessionOptions { Det = op, Cls = op, Rec = op };
+    }
+
+    /// <summary>
+    /// The options one model is loaded with: the caller's own, left for them to dispose, or a
+    /// default built for a null slot, which is ours and is disposed with this wrapper.
+    /// </summary>
+    private readonly struct ResolvedSessionOptions : IDisposable
+    {
+        private readonly bool _owned;
+
+        public SessionOptions Options { get; }
+
+        private ResolvedSessionOptions(SessionOptions options, bool owned)
+        {
+            Options = options;
+            _owned = owned;
+        }
+
+        public static ResolvedSessionOptions For(SessionOptions? options, int numThread)
+        {
+            return options is null
+                ? new ResolvedSessionOptions(GetDefaultSessionOptions(numThread), true)
+                : new ResolvedSessionOptions(options, false);
+        }
+
+        public void Dispose()
+        {
+            if (_owned)
+            {
+                Options.Dispose();
+            }
+        }
     }
 
     /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, IProgress{ValueTuple{int, int}}, CancellationToken)"/>

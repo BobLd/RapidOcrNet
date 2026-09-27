@@ -44,6 +44,11 @@ static int Verify()
     using RapidOcr cpu = CreateOcr(ExecutionProviderKind.Cpu);
     using RapidOcr webGpu = CreateOcr(ExecutionProviderKind.WebGpu);
 
+    // The per-model layout from issue #51: accelerator on the two big graphs, CPU for the
+    // classifier. Checked here too, since mixing providers is a new way to get different text.
+    using RapidOcr mixed = CreateMixedOcr(new ProviderLayout(
+        ExecutionProviderKind.WebGpu, ExecutionProviderKind.Cpu, ExecutionProviderKind.WebGpu));
+
     var options = RapidOcrOptions.PPOCRv6;
     int mismatches = 0;
 
@@ -55,15 +60,19 @@ static int Verify()
         // on WebGPU, shader compilation. The reported numbers come from the second pass.
         _ = cpu.Detect(bitmap, options);
         _ = webGpu.Detect(bitmap, options);
+        _ = mixed.Detect(bitmap, options);
 
         OcrResult cpuResult = cpu.Detect(bitmap, options);
         OcrResult webGpuResult = webGpu.Detect(bitmap, options);
+        OcrResult mixedResult = mixed.Detect(bitmap, options);
 
         Console.WriteLine($"{image}  ({bitmap.Width}x{bitmap.Height})");
         Report("  CPU   ", cpuResult);
         Report("  WebGPU", webGpuResult);
+        Report("  Mixed ", mixedResult);
 
-        bool same = string.Equals(cpuResult.StrRes, webGpuResult.StrRes, StringComparison.Ordinal);
+        bool same = string.Equals(cpuResult.StrRes, webGpuResult.StrRes, StringComparison.Ordinal)
+                    && string.Equals(cpuResult.StrRes, mixedResult.StrRes, StringComparison.Ordinal);
         Console.WriteLine($"  text  : {(same ? "identical" : "DIFFERENT - a speed-up here would not be free")}");
         Console.WriteLine();
 
@@ -75,7 +84,7 @@ static int Verify()
 
     if (mismatches > 0)
     {
-        Console.Error.WriteLine($"{mismatches} image(s) produced different text between the two providers.");
+        Console.Error.WriteLine($"{mismatches} image(s) produced different text between the providers.");
         return 2;
     }
 
@@ -101,5 +110,13 @@ static RapidOcr CreateOcr(ExecutionProviderKind kind)
     var ocr = new RapidOcr();
     using SessionOptions sessionOptions = ExecutionProviders.Create(kind);
     ocr.InitModels(BenchmarkAssets.PPOCRv6Small, sessionOptions);
+    return ocr;
+}
+
+static RapidOcr CreateMixedOcr(ProviderLayout layout)
+{
+    var ocr = new RapidOcr();
+    using PerModelSessionOptions sessionOptions = ExecutionProviders.CreatePerModel(layout);
+    ocr.InitModels(BenchmarkAssets.PPOCRv6Small, sessionOptions.Options);
     return ocr;
 }

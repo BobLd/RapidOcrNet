@@ -58,10 +58,11 @@ Useful filters:
 | Session creation only | `--filter "*ModelInitBenchmarks*"` |
 | Detector in isolation | `--filter "*OcrPipelineBenchmarks*" --anyCategories DetectorOnly` |
 | Recognizer parallelism sweep | `--filter "*RecognizerParallelBenchmarks*"` |
+| Per-model provider layouts | `--filter "*PerModelProviderBenchmarks*"` |
 | One image | `--filter "*img_11*"` |
 | CPU arm only (no GPU on this box) | `--filter "*.Cpu*"` |
 
-## What the three suites mean
+## What the suites mean
 
 **`OcrPipelineBenchmarks`** — steady-state inference, sessions already created in
 `[GlobalSetup]`. Two categories, each with its own CPU baseline so the `Ratio` column
@@ -102,6 +103,24 @@ of that inequality.
 the dense page under both providers. Each `[Params]` value is its own BenchmarkDotNet logical
 group, so there is no meaningful `Ratio` column — compare the absolute `Mean` down each
 category.
+
+**`PerModelProviderBenchmarks`** — steady-state full pipeline when the three models do not
+share one provider, via `RapidOcr.InitModels(RapidOcrModelSet, RapidOcrSessionOptions)`
+([issue #51](https://github.com/BobLd/RapidOcrNet/issues/51)). Four arms over the same
+images, all CPU as the baseline:
+
+| Arm | Detector | Classifier | Recognizer |
+|---|---|---|---|
+| all CPU (baseline) | CPU | CPU | CPU |
+| all WebGPU | WebGPU | WebGPU | WebGPU |
+| WebGPU det+rec, CPU cls | WebGPU | CPU | WebGPU |
+| WebGPU det, CPU cls+rec | WebGPU | CPU | CPU |
+
+The third is the layout the issue found fastest with CoreML on Apple Silicon: the classifier
+is a tiny graph run once per crop, so an accelerator's per-dispatch overhead can cost more
+than it saves. Every slot is filled from `ExecutionProviders.Create`, so the layout is the
+only difference between arms. `verify` also runs the third layout and checks its text against
+the other two.
 
 ## Results on one machine
 

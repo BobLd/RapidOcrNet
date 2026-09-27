@@ -16,8 +16,52 @@ internal enum ExecutionProviderKind
 }
 
 /// <summary>
+/// Which execution provider each of the three models runs on. The shape issue #51 asks for is
+/// the provider on the two big graphs (detector, recognizer) and plain CPU for the tiny
+/// classifier, whose dispatch overhead on an accelerator can outweigh its compute.
+/// </summary>
+internal readonly record struct ProviderLayout(
+    ExecutionProviderKind Det,
+    ExecutionProviderKind Cls,
+    ExecutionProviderKind Rec)
+{
+    public static ProviderLayout All(ExecutionProviderKind kind) => new(kind, kind, kind);
+
+    public bool Uses(ExecutionProviderKind kind) => Det == kind || Cls == kind || Rec == kind;
+
+    public override string ToString() => $"det={Det} cls={Cls} rec={Rec}";
+}
+
+/// <summary>
+/// The per-model options for one <see cref="ProviderLayout"/>, plus ownership of the
+/// <see cref="SessionOptions"/> behind them. <see cref="RapidOcrSessionOptions"/> leaves
+/// caller-supplied options to the caller, so this is what disposes them.
+/// </summary>
+internal sealed class PerModelSessionOptions : IDisposable
+{
+    private readonly SessionOptions[] _owned;
+
+    public RapidOcrSessionOptions Options { get; }
+
+    internal PerModelSessionOptions(RapidOcrSessionOptions options, SessionOptions[] owned)
+    {
+        Options = options;
+        _owned = owned;
+    }
+
+    public void Dispose()
+    {
+        foreach (SessionOptions options in _owned)
+        {
+            options.Dispose();
+        }
+    }
+}
+
+/// <summary>
 /// Builds the <see cref="SessionOptions"/> the benchmarks hand to
-/// <see cref="RapidOcr.InitModels(RapidOcrModelSet, SessionOptions)"/>.
+/// <see cref="RapidOcr.InitModels(RapidOcrModelSet, SessionOptions)"/>, or, per model, to
+/// <see cref="RapidOcr.InitModels(RapidOcrModelSet, RapidOcrSessionOptions)"/>.
 /// </summary>
 /// <remarks>
 /// Both variants start from <see cref="RapidOcr.GetDefaultSessionOptions"/>, so graph
@@ -154,6 +198,49 @@ internal static class ExecutionProviders
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// Creates per-model session options for <paramref name="layout"/>. Every slot is filled
+    /// explicitly, each from <see cref="Create"/>, so graph optimization and thread counts
+    /// match the single-provider arms and the layout is the only variable. Models on the same
+    /// provider share one <see cref="SessionOptions"/>. Dispose the result once the sessions
+    /// have been created.
+    /// </summary>
+    public static PerModelSessionOptions CreatePerModel(ProviderLayout layout, int numThread = 0)
+    {
+        var byKind = new Dictionary<ExecutionProviderKind, SessionOptions>();
+        try
+        {
+            SessionOptions For(ExecutionProviderKind kind)
+            {
+                if (!byKind.TryGetValue(kind, out SessionOptions? options))
+                {
+                    options = Create(kind, numThread);
+                    byKind.Add(kind, options);
+                }
+
+                return options;
+            }
+
+            var sessionOptions = new RapidOcrSessionOptions
+            {
+                Det = For(layout.Det),
+                Cls = For(layout.Cls),
+                Rec = For(layout.Rec)
+            };
+
+            return new PerModelSessionOptions(sessionOptions, byKind.Values.ToArray());
+        }
+        catch
+        {
+            foreach (SessionOptions options in byKind.Values)
+            {
+                options.Dispose();
+            }
+
+            throw;
+        }
     }
 
     private static OrtEpDevice RegisterAndFindWebGpuDevice()
