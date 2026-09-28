@@ -52,13 +52,6 @@ public sealed class TextClassifier : IDisposable
         SetSession(new InferenceSession(model, op));
     }
 
-    /// <inheritdoc cref="InitModel(byte[], SessionOptions)"/>
-    /// <remarks>The stream is read to its end and left open.</remarks>
-    public void InitModel(Stream modelStream, SessionOptions op)
-    {
-        InitModel(ModelStreams.ReadAllBytes(modelStream, nameof(modelStream)), op);
-    }
-
     public void InitModel(string path, int numThread)
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
@@ -70,13 +63,6 @@ public sealed class TextClassifier : IDisposable
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
         InitModel(model, sessionOptions);
-    }
-
-    /// <inheritdoc cref="InitModel(Stream, SessionOptions)"/>
-    public void InitModel(Stream modelStream, int numThread)
-    {
-        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
-        InitModel(modelStream, sessionOptions);
     }
 
     /// <summary>

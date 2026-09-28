@@ -183,70 +183,10 @@ public sealed partial class RapidOcr : IDisposable
     }
 
     /// <summary>
-    /// Initialize using models read from streams and default options. Use this when the models do
-    /// not exist as files this process can open — embedded resources, zip entries, blobs fetched
-    /// over the network. Every stream is read to its end and left open.
-    /// </summary>
-    public void InitModels(Stream detStream, Stream clsStream, Stream recStream, Stream keysStream,
-        int numThread = 0)
-    {
-        using var sessionOptions = GetDefaultSessionOptions(numThread);
-        InitModels(detStream, clsStream, recStream, keysStream, sessionOptions);
-    }
-
-    /// <summary>
-    /// Initialize using models read from streams and custom options. Use this when the models do
-    /// not exist as files this process can open — embedded resources, zip entries, blobs fetched
-    /// over the network. Every stream is read to its end and left open.
-    /// </summary>
-    /// <remarks>
-    /// The detector is normalized the way the bundled PP-OCRv5 models expect. A PP-OCRv6 detector
-    /// needs the other values, which the detector cannot work out by itself, so pass a
-    /// <see cref="RapidOcrModelStreamSet"/> instead of individual streams for those.
-    /// </remarks>
-    public void InitModels(Stream detStream, Stream clsStream, Stream recStream, Stream keysStream,
-        SessionOptions op)
-    {
-        // Checked here, not only where each stream is read, so a null is reported against the
-        // argument name the caller actually used. The stages check again for direct callers.
-        ArgumentNullException.ThrowIfNull(detStream);
-        ArgumentNullException.ThrowIfNull(clsStream);
-        ArgumentNullException.ThrowIfNull(recStream);
-        ArgumentNullException.ThrowIfNull(keysStream);
-
-        _textDetector.InitModel(detStream, op);
-        _textClassifier.InitModel(clsStream, op);
-        _textRecognizer.InitModel(recStream, keysStream, op);
-    }
-
-    /// <summary>
-    /// Initialize using a stream model set (e.g. PP-OCRv6 models held in memory, where the
-    /// detector normalization has to be stated) and default options.
-    /// </summary>
-    public void InitModels(RapidOcrModelStreamSet models, int numThread = 0)
-    {
-        using var sessionOptions = GetDefaultSessionOptions(numThread);
-        InitModels(models, sessionOptions);
-    }
-
-    /// <summary>
-    /// Initialize using a stream model set (e.g. PP-OCRv6 models held in memory, where the
-    /// detector normalization has to be stated) and custom options. The set carries the
-    /// detector's per-version normalization, so v6 detectors are wired up correctly.
-    /// </summary>
-    public void InitModels(RapidOcrModelStreamSet models, SessionOptions op)
-    {
-        ArgumentNullException.ThrowIfNull(models);
-
-        _textDetector.InitModel(models.DetModelStream, models.DetMean, models.DetStd, op);
-        _textClassifier.InitModel(models.ClsModelStream, op);
-        _textRecognizer.InitModel(models.RecModelStream, models.KeysStream, op);
-    }
-
-    /// <summary>
     /// Initialize using models already in memory as byte arrays and default options. Use this when
-    /// the caller has the bytes rather than a path or a stream: a model decrypted from an embedded
-    /// resource, or decompressed from a blob.
+    /// the caller has the bytes rather than a path: a model decrypted from an embedded resource, or
+    /// decompressed from a blob. A model that arrives as a stream is the caller's to read into an
+    /// array first — this library loads models from paths and from bytes, never from streams.
     /// </summary>
     /// <remarks>
     /// Nothing is copied on this side — the arrays go straight to the runtime, which parses them and
@@ -262,8 +202,7 @@ public sealed partial class RapidOcr : IDisposable
 
     /// <summary>
     /// Initialize using models already in memory as byte arrays and custom options. Use this when
-    /// the caller has the bytes rather than a path or a stream: a model decrypted from an embedded
-    /// resource, or decompressed from a blob.
+    /// the caller has the bytes rather than a path, as above.
     /// </summary>
     /// <remarks>
     /// Nothing is copied on this side — the arrays go straight to the runtime, which parses them and

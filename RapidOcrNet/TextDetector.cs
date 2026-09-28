@@ -69,13 +69,6 @@ public sealed class TextDetector : IDisposable
         _inputName = _dbNet.InputMetadata.Keys.First();
     }
 
-    /// <inheritdoc cref="InitModel(byte[], SessionOptions)"/>
-    /// <remarks>The stream is read to its end and left open.</remarks>
-    public void InitModel(Stream modelStream, SessionOptions op)
-    {
-        InitModel(ModelStreams.ReadAllBytes(modelStream, nameof(modelStream)), op);
-    }
-
     /// <summary>
     /// Initialize the detector with explicit pixel-space normalization. <paramref name="mean"/>
     /// and <paramref name="std"/> are in pixel space (e.g. 0.5 maps to 127.5). The std is
@@ -97,15 +90,6 @@ public sealed class TextDetector : IDisposable
         ApplyNormalization(mean, std);
     }
 
-    /// <inheritdoc cref="InitModel(string, float[], float[], SessionOptions)"/>
-    /// <remarks>The stream is read to its end and left open.</remarks>
-    public void InitModel(Stream modelStream, float[] mean, float[] std, SessionOptions op)
-    {
-        ValidateNormalization(mean, std);
-        InitModel(modelStream, op);
-        ApplyNormalization(mean, std);
-    }
-
     public void InitModel(string path, int numThread)
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
@@ -119,16 +103,8 @@ public sealed class TextDetector : IDisposable
         InitModel(model, sessionOptions);
     }
 
-    /// <inheritdoc cref="InitModel(Stream, SessionOptions)"/>
-    public void InitModel(Stream modelStream, int numThread)
-    {
-        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
-        InitModel(modelStream, sessionOptions);
-    }
-
     /// <summary>
-    /// Validates normalization arguments up front, before a session is built from them and before
-    /// a model stream is consumed.
+    /// Validates normalization arguments up front, before a session is built from them.
     /// </summary>
     private static void ValidateNormalization(float[] mean, float[] std)
     {

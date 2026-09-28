@@ -11,9 +11,8 @@ namespace RapidOcrNet;
 /// Use this when the models are already bytes: decrypted from an encrypted resource, decompressed
 /// from a blob, or handed over by something that reads them itself. A model given as a
 /// <c>byte[]</c> is not copied by this library — it goes straight to the runtime, which parses it
-/// and takes its own copy while the session is built — so this is the one route that costs no
-/// managed allocation of its own. (A stream has to be read into a buffer first; see
-/// <see cref="RapidOcrModelStreamSet"/>.)
+/// and takes its own copy while the session is built. A model that arrives as a stream has to be
+/// read into an array by the caller before it can be passed here.
 /// </para>
 /// <para>
 /// Normalization defaults to what the bundled PP-OCRv5 detectors expect. A PP-OCRv6 detector needs

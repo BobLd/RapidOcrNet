@@ -55,16 +55,6 @@ public sealed class TextRecognizer : IDisposable
         _keys = InitKeys(keys);
     }
 
-    /// <inheritdoc cref="InitModel(byte[], byte[], SessionOptions)"/>
-    /// <remarks>Both streams are read to their ends and left open.</remarks>
-    public void InitModel(Stream modelStream, Stream keysStream, SessionOptions op)
-    {
-        ModelStreams.EnsureReadable(keysStream, nameof(keysStream));
-
-        SetModel(ModelStreams.ReadAllBytes(modelStream, nameof(modelStream)), op);
-        _keys = InitKeys(keysStream);
-    }
-
     private void SetModel(byte[] model, SessionOptions op)
     {
         _crnnNet = new InferenceSession(model, op);
@@ -84,46 +74,33 @@ public sealed class TextRecognizer : IDisposable
         InitModel(model, keys, sessionOptions);
     }
 
-    /// <inheritdoc cref="InitModel(Stream, Stream, SessionOptions)"/>
-    public void InitModel(Stream modelStream, Stream keysStream, int numThread)
+    private static string[] InitKeys(string path)
     {
-        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
-        InitModel(modelStream, keysStream, sessionOptions);
+        using var sr = new StreamReader(path, Encoding.UTF8);
+        return ReadKeys(sr);
     }
 
     private static string[] InitKeys(byte[] keys)
     {
-        // A MemoryStream over an existing array wraps it rather than copying it, so this is the
-        // same read the stream overload does without a second buffer in between.
-        using var stream = new MemoryStream(keys, writable: false);
-        return InitKeys(stream);
+        // A MemoryStream over an existing array only wraps it, it does not copy it. The reader owns
+        // and disposes both.
+        using var sr = new StreamReader(new MemoryStream(keys, writable: false), Encoding.UTF8);
+        return ReadKeys(sr);
     }
 
-    private static string[] InitKeys(string path)
+    private static string[] ReadKeys(StreamReader sr)
     {
-        using var fs = File.OpenRead(path);
-        return InitKeys(fs);
-    }
+        List<string> keys = ["#"];
 
-    private static string[] InitKeys(Stream stream)
-    {
-        // leaveOpen: the reader borrows the caller's stream rather than owning it, so loading from
-        // a stream does not close a stream the caller may still want to use.
-        using (var sr = new StreamReader(stream, Encoding.UTF8,
-            detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true))
+        while (sr.ReadLine() is { } line)
         {
-            List<string> keys = ["#"];
-
-            while (sr.ReadLine() is { } line)
-            {
-                keys.Add(line);
-            }
-
-            keys.Add(" ");
-            System.Diagnostics.Debug.WriteLine($"keys Size = {keys.Count}");
-
-            return keys.ToArray();
+            keys.Add(line);
         }
+
+        keys.Add(" ");
+        System.Diagnostics.Debug.WriteLine($"keys Size = {keys.Count}");
+
+        return keys.ToArray();
     }
 
     /// <summary>
