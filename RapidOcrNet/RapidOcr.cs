@@ -182,6 +182,73 @@ public sealed partial class RapidOcr : IDisposable
         }
     }
 
+    /// <summary>
+    /// Initialize using models already in memory as byte arrays and default options. Use this when
+    /// the caller has the bytes rather than a path: a model decrypted from an embedded resource, or
+    /// decompressed from a blob. A model that arrives as a stream is the caller's to read into an
+    /// array first — this library loads models from paths and from bytes, never from streams.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is copied on this side — the arrays go straight to the runtime, which parses them and
+    /// takes its own copy as each session is built — so they can be wiped or reused as soon as this
+    /// returns.
+    /// </remarks>
+    public void InitModels(byte[] detModel, byte[] clsModel, byte[] recModel, byte[] keys,
+        int numThread = 0)
+    {
+        using var sessionOptions = GetDefaultSessionOptions(numThread);
+        InitModels(detModel, clsModel, recModel, keys, sessionOptions);
+    }
+
+    /// <summary>
+    /// Initialize using models already in memory as byte arrays and custom options. Use this when
+    /// the caller has the bytes rather than a path, as above.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is copied on this side — the arrays go straight to the runtime, which parses them and
+    /// takes its own copy as each session is built — so they can be wiped or reused as soon as this
+    /// returns. The detector is normalized the way the bundled PP-OCRv5 models expect; for a
+    /// PP-OCRv6 detector pass a <see cref="RapidOcrModelByteSet"/>, which carries the normalization.
+    /// </remarks>
+    public void InitModels(byte[] detModel, byte[] clsModel, byte[] recModel, byte[] keys,
+        SessionOptions op)
+    {
+        // Checked here as well as where each array is used, so a null is reported against the
+        // argument name the caller actually used.
+        ArgumentNullException.ThrowIfNull(detModel);
+        ArgumentNullException.ThrowIfNull(clsModel);
+        ArgumentNullException.ThrowIfNull(recModel);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        _textDetector.InitModel(detModel, op);
+        _textClassifier.InitModel(clsModel, op);
+        _textRecognizer.InitModel(recModel, keys, op);
+    }
+
+    /// <summary>
+    /// Initialize using a byte model set (e.g. PP-OCRv6 models held in memory, where the detector
+    /// normalization has to be stated) and default options.
+    /// </summary>
+    public void InitModels(RapidOcrModelByteSet models, int numThread = 0)
+    {
+        using var sessionOptions = GetDefaultSessionOptions(numThread);
+        InitModels(models, sessionOptions);
+    }
+
+    /// <summary>
+    /// Initialize using a byte model set (e.g. PP-OCRv6 models held in memory, where the detector
+    /// normalization has to be stated) and custom options. The set carries the detector's
+    /// per-version normalization, so v6 detectors are wired up correctly.
+    /// </summary>
+    public void InitModels(RapidOcrModelByteSet models, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+
+        _textDetector.InitModel(models.DetModelBytes, models.DetMean, models.DetStd, op);
+        _textClassifier.InitModel(models.ClsModelBytes, op);
+        _textRecognizer.InitModel(models.RecModelBytes, models.KeysBytes, op);
+    }
+
     /// <inheritdoc cref="Detect(SKBitmap, RapidOcrOptions, IProgress{ValueTuple{int, int}}, CancellationToken)"/>
     public OcrResult Detect(string path, RapidOcrOptions options, CancellationToken cancellationToken = default)
     {

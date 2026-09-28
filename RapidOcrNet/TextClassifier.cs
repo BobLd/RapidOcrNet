@@ -35,12 +35,52 @@ public sealed class TextClassifier : IDisposable
             throw new FileNotFoundException($"Classifier model file does not exist: '{path}'.");
         }
 
-        _angleNet = new InferenceSession(path, op);
-        _inputName = _angleNet.InputMetadata.Keys.First();
+        SetSession(new InferenceSession(path, op));
+    }
+
+    /// <summary>
+    /// Initialize the classifier from an ONNX model already in memory.
+    /// </summary>
+    /// <remarks>
+    /// The runtime parses and copies the model as the session is built, so the array is the caller's
+    /// again the moment this returns.
+    /// </remarks>
+    public void InitModel(byte[] model, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        SetSession(new InferenceSession(model, op));
+    }
+
+    public void InitModel(string path, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(path, sessionOptions);
+    }
+
+    /// <inheritdoc cref="InitModel(byte[], SessionOptions)"/>
+    public void InitModel(byte[] model, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(model, sessionOptions);
+    }
+
+    /// <summary>
+    /// Takes over an already-built session and reads the input geometry it declares.
+    /// </summary>
+    /// <remarks>
+    /// The PP-OCRv5 ch_PP-LCNet_x0_25_textline_ori cls exports a fixed input [-1,3,80,160], so the
+    /// 80x160 it declares has to be fed; older dynamic-shape cls models declare -1 and keep the
+    /// legacy 48x192 default.
+    /// </remarks>
+    private void SetSession(InferenceSession session)
+    {
+        _angleNet = session;
+        _inputName = session.InputMetadata.Keys.First();
 
         // NCHW input: dims[2] is height, dims[3] is width. A dimension of -1 means
         // dynamic, in which case we keep the legacy 48x192 default.
-        int[] dims = _angleNet.InputMetadata[_inputName].Dimensions;
+        int[] dims = session.InputMetadata[_inputName].Dimensions;
         if (dims is { Length: 4 })
         {
             if (dims[2] > 0)
@@ -53,12 +93,6 @@ public sealed class TextClassifier : IDisposable
                 _angleDstWidth = dims[3];
             }
         }
-    }
-
-    public void InitModel(string path, int numThread)
-    {
-        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
-        InitModel(path, sessionOptions);
     }
 
     /// <param name="cancellationToken">

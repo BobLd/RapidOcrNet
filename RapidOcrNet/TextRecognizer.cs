@@ -39,28 +39,68 @@ public sealed class TextRecognizer : IDisposable
         _keys = InitKeys(keysPath);
     }
 
+    /// <summary>
+    /// Initialize the recognizer from an ONNX model and a character dictionary already in memory.
+    /// </summary>
+    /// <remarks>
+    /// The runtime parses and copies the model as the session is built, so the model array is the
+    /// caller's again the moment this returns.
+    /// </remarks>
+    public void InitModel(byte[] model, byte[] keys, SessionOptions op)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        SetModel(model, op);
+        _keys = InitKeys(keys);
+    }
+
+    private void SetModel(byte[] model, SessionOptions op)
+    {
+        _crnnNet = new InferenceSession(model, op);
+        _inputName = _crnnNet.InputMetadata.Keys.First();
+    }
+
     public void InitModel(string path, string keysPath, int numThread)
     {
         using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
         InitModel(path, keysPath, sessionOptions);
     }
 
+    /// <inheritdoc cref="InitModel(byte[], byte[], SessionOptions)"/>
+    public void InitModel(byte[] model, byte[] keys, int numThread)
+    {
+        using var sessionOptions = RapidOcr.GetDefaultSessionOptions(numThread);
+        InitModel(model, keys, sessionOptions);
+    }
+
     private static string[] InitKeys(string path)
     {
-        using (var sr = new StreamReader(path, Encoding.UTF8))
+        using var sr = new StreamReader(path, Encoding.UTF8);
+        return ReadKeys(sr);
+    }
+
+    private static string[] InitKeys(byte[] keys)
+    {
+        // A MemoryStream over an existing array only wraps it, it does not copy it. The reader owns
+        // and disposes both.
+        using var sr = new StreamReader(new MemoryStream(keys, writable: false), Encoding.UTF8);
+        return ReadKeys(sr);
+    }
+
+    private static string[] ReadKeys(StreamReader sr)
+    {
+        List<string> keys = ["#"];
+
+        while (sr.ReadLine() is { } line)
         {
-            List<string> keys = ["#"];
-
-            while (sr.ReadLine() is { } line)
-            {
-                keys.Add(line);
-            }
-
-            keys.Add(" ");
-            System.Diagnostics.Debug.WriteLine($"keys Size = {keys.Count}");
-
-            return keys.ToArray();
+            keys.Add(line);
         }
+
+        keys.Add(" ");
+        System.Diagnostics.Debug.WriteLine($"keys Size = {keys.Count}");
+
+        return keys.ToArray();
     }
 
     /// <summary>

@@ -267,6 +267,55 @@ ocr.InitModels(
 
 The recognizer's character set is defined by the `*_dict.txt` file — it **must** match the `*_rec_*.onnx` you load, otherwise the output will be gibberish.
 
+### Loading models from bytes
+When the models are already bytes — decrypted from an encrypted resource, decompressed from a blob, or read by something else on your behalf — hand the arrays over directly. Nothing is copied on the way in:
+```csharp
+byte[] det  = Decrypt(Resources.DetModel);
+byte[] cls  = Decrypt(Resources.ClsModel);
+byte[] rec  = Decrypt(Resources.RecModel);
+byte[] keys = Decrypt(Resources.Keys);
+
+ocr.InitModels(det, cls, rec, keys);
+
+// Or, with custom session options:
+// ocr.InitModels(det, cls, rec, keys, sessionOptions);
+```
+
+The runtime parses each model and takes its own copy while the session is built, so the plaintext is yours again the moment `InitModels` returns — **it can be wiped straight away**, rather than leaving decrypted weights on the heap for the life of the process:
+```csharp
+ocr.InitModels(det, cls, rec, keys);
+
+CryptographicOperations.ZeroMemory(det);
+CryptographicOperations.ZeroMemory(cls);
+CryptographicOperations.ZeroMemory(rec);
+CryptographicOperations.ZeroMemory(keys);
+```
+
+A PP-OCRv6 detector needs its own normalization here too, so pass a `RapidOcrModelByteSet` instead:
+```csharp
+var v6 = RapidOcrModelSet.PPOCRv6Small;   // used here for its normalization only
+
+ocr.InitModels(new RapidOcrModelByteSet
+{
+    DetModelBytes = detBytes,
+    ClsModelBytes = clsBytes,
+    RecModelBytes = recBytes,
+    KeysBytes     = keysBytes,
+    DetMean       = v6.DetMean,
+    DetStd        = v6.DetStd,
+});
+```
+
+A model that arrives as a **stream** — an embedded resource, a zip entry, a network response — is yours to read: `InitModels` takes paths or byte arrays, and nothing in the library materialises a stream on your behalf.
+```csharp
+using var stream = Assembly.GetManifestResourceStream("MyApp.Resources.det.onnx")!;
+using var buffer = new MemoryStream();
+stream.CopyTo(buffer);
+byte[] det = buffer.ToArray();
+```
+
+> **Which route to pick.** If the models are on disk, use the path overloads: ONNX Runtime opens the file itself, so nothing at all lands on the managed heap. Byte arrays are for models that never become a file; they cost one array, which the runtime copies out of while it builds the session — so it is free to reuse or wipe as soon as `InitModels` returns.
+
 ## Notice
 Based on source code originally developed in the RapidOCR project (Apache-2.0 license).
 - https://github.com/RapidAI/RapidOCR
